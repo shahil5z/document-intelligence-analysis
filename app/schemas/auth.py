@@ -1,0 +1,32 @@
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+PASSWORD_MIN_LENGTH = 12
+PASSWORD_MAX_LENGTH = 128
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"email": "jane@example.com", "password": "correct-horse-battery-staple"}
+        }
+    )
+
+    email: EmailStr
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"email": "jane@example.com", "password": "correct-horse-battery-staple"}
+        }
+    )
+
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"  # noqa: S105  (OAuth2 token type, not a secret)
+    expires_in: int = Field(description="Token lifetime in seconds.", examples=[1800])
