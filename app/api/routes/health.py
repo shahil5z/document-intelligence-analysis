@@ -1,8 +1,14 @@
-from fastapi import APIRouter
+import logging
+from typing import Annotated
 
-from app.schemas.health import LivenessResponse
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
+from app.schemas.health import DependencyCheck, LivenessResponse, ReadinessResponse
+from app.services.health_service import HealthService, get_health_service
 
 router = APIRouter(prefix="/health", tags=["health"])
+logger = logging.getLogger(__name__)
 
 
 @router.get(
@@ -13,3 +19,26 @@ router = APIRouter(prefix="/health", tags=["health"])
 )
 def liveness() -> LivenessResponse:
     return LivenessResponse()
+
+
+@router.get(
+    "/ready",
+    response_model=ReadinessResponse,
+    summary="Readiness probe",
+    description="Runs `SELECT 1` on PostgreSQL and `PING` on Redis. Returns 503 if either fails.",
+    responses={503: {"model": ReadinessResponse, "description": "A dependency is unavailable"}},
+)
+def readiness(
+    health: Annotated[HealthService, Depends(get_health_service)],
+) -> JSONResponse:
+    checks: dict[str, DependencyCheck] = {
+        "database": health.check_database(),
+        "redis": health.check_redis(),
+    }
+    ready = all(check.status == "ok" for check in checks.values())
+    if not ready:
+        logger.warning(
+            "health.not_ready", extra={"checks": {k: v.status for k, v in checks.items()}}
+        )
+    body = ReadinessResponse(status="ready" if ready else "not_ready", checks=checks)
+    return JSONResponse(status_code=200 if ready else 503, content=body.model_dump(mode="json"))
