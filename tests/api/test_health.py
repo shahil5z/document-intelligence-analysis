@@ -8,10 +8,26 @@ from app.db.session import get_engine
 from app.services.health_service import HealthService, get_health_service
 
 
-def test_liveness(client: TestClient) -> None:
-    response = client.get("/health")
+@pytest.mark.parametrize("path", ["/health", "/health/live"])
+def test_liveness(client: TestClient, path: str) -> None:
+    response = client.get(path)
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_readiness_reports_503_when_redis_rejects_credentials(
+    app: FastAPI, client: TestClient
+) -> None:
+    redis_url = os.environ.get("TEST_REDIS_URL")
+    if not redis_url or "@" not in redis_url:
+        pytest.skip("TEST_REDIS_URL with a password not set")
+    scheme, rest = redis_url.split("://", 1)
+    wrong = f"{scheme}://:wrong-password@{rest.split('@', 1)[1]}"
+    app.dependency_overrides[get_health_service] = lambda: HealthService(get_engine(), wrong)
+    response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["checks"]["redis"]["status"] == "error"
+    assert "wrong-password" not in response.text
 
 
 def test_readiness_reports_503_when_redis_is_unreachable(app: FastAPI, client: TestClient) -> None:

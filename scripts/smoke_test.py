@@ -132,6 +132,8 @@ def main() -> None:
 
     status, headers, body = client.request("GET", "/health")
     check(status == 200 and "x-request-id" in headers, f"GET /health -> {status}")
+    status, _, body = client.request("GET", "/health/live")
+    check(status == 200 and body == {"status": "ok"}, f"GET /health/live -> {status}")
     status, _, body = client.request("GET", "/health/ready")
     check(status == 200 and body["status"] == "ready", f"GET /health/ready -> {status} {body}")
 
@@ -176,6 +178,25 @@ def main() -> None:
     check(
         status == 200 and body["total"] == 2 and len(body["items"]) == 1,
         f"GET /documents -> total={body['total']}",
+    )
+
+    intruder = Client(args.base_url)
+    other_email = f"smoke-other-{uuid.uuid4().hex[:8]}@example.com"
+    intruder.request(
+        "POST", "/auth/register", json_body={"email": other_email, "password": password}
+    )
+    _, _, body = intruder.request(
+        "POST", "/auth/login", json_body={"email": other_email, "password": password}
+    )
+    intruder.token = body["access_token"]
+    for path in (f"/documents/{documents[0]}", f"/documents/{documents[0]}/status"):
+        status, _, _ = intruder.request("GET", path)
+        check(status == 404, f"other user GET {path} -> {status}")
+    status, _, _ = intruder.request("DELETE", f"/documents/{documents[0]}")
+    check(status == 404, f"other user DELETE /documents/{documents[0]} -> {status}")
+    status, _, body = intruder.request("GET", "/documents")
+    check(
+        status == 200 and body["total"] == 0, f"other user GET /documents -> total={body['total']}"
     )
 
     for document_id in documents:

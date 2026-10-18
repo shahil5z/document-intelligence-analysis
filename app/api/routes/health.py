@@ -22,6 +22,16 @@ def liveness() -> LivenessResponse:
 
 
 @router.get(
+    "/live",
+    response_model=LivenessResponse,
+    summary="Liveness probe (alias)",
+    description="Same as `GET /health`, for orchestrators that expect a `/live` path.",
+)
+def liveness_live() -> LivenessResponse:
+    return LivenessResponse()
+
+
+@router.get(
     "/ready",
     response_model=ReadinessResponse,
     summary="Readiness probe",
