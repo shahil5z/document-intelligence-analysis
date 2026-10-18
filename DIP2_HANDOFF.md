@@ -1,5 +1,18 @@
 # DIP2 hand-off: document intelligence (extraction, chunking, embeddings, retrieval, `/ask`)
 
+> **Historical stage record.** The numbers and NOT VERIFIED items below describe the
+> state at the end of this stage and are kept unchanged as history. The current,
+> verified state of the whole system (tests, Docker, CI, security, benchmark) is in
+> [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md); where this file disagrees with
+> it, the final report and the code win.
+>
+> Corrections found in the final audit: an empty LLM reply is treated as
+> *insufficient evidence* (200), not 503; the scanned-PDF message is "No extractable
+> text was found. Scanned documents and images are not supported (OCR is not
+> implemented)."; a hard-time-limit kill no longer leaves the job `processing`
+> (bounded claims, DIP3; stale-job reconciler, final). The 247 passed / 2 skipped
+> result is the DIP2 run; the final run is 364 passed, 0 skipped, 96%.
+
 Branch `dip2`, based on DIP1 commit `2643292` (`main` unchanged). Verification was
 run on 2026-10-18 on a Linux dev box (Docker, Python 3.12, uv); the Windows host
 had no Docker/uv/PostgreSQL, see "Not verified".

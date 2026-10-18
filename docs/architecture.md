@@ -23,8 +23,11 @@ Middleware, outermost first (`app/main.py::_register_middleware`):
 Rate limits are FastAPI dependencies (`app/api/dependencies/rate_limit.py`): per client
 IP for register/login, per normalised email for login, per user id for upload,
 reprocess, search and ask. The limiter (`app/core/rate_limit.py`) is a fixed window in
-Redis (`INCR` + `EXPIRE`, key `dip:rl:{scope}:{window}:{sha256(identifier)}`), fails open
-on Redis errors (counted in `dip_rate_limiter_errors_total`), or in memory for tests.
+Redis (`INCR` + `EXPIRE`, key `dip:rl:{scope}:{window}:{sha256(identifier)}`), or in
+memory for tests. On Redis errors the limiter raises `RateLimiterUnavailableError`;
+the dependency fails **closed** (503 + `Retry-After`) for register/login and **open**
+for authenticated endpoints, counting both in
+`dip_rate_limiter_errors_total{scope,decision}` ([SECURITY.md](SECURITY.md#rate-limiting)).
 
 ## System overview
 
@@ -32,9 +35,9 @@ on Redis errors (counted in `dip_rate_limiter_errors_total`), or in memory for t
 flowchart LR
     client[Client / Swagger UI] -->|HTTPS JSON + multipart| api[FastAPI API<br/>app/main.py]
     api -->|SQLAlchemy sync, psycopg 3| pg[(PostgreSQL 16<br/>+ pgvector extension)]
-    api -->|publish documents.process, AUTH| redis[(Redis<br/>Celery broker, requirepass)]
+    api -->|publish documents.process, rate limits, AUTH| redis[(Redis<br/>broker + rate limits, password)]
     api -->|save / delete| storage[[Storage volume<br/>LocalStorage]]
-    worker[Celery worker<br/>app/workers] -->|consume, AUTH| redis
+    worker[Celery worker + beat<br/>app/workers] -->|consume, AUTH| redis
     worker -->|claim / update job, write chunks + vectors| pg
     worker -->|read| storage
     worker -->|embed passages| model[[bge-small-en-v1.5<br/>local, HF cache volume]]
@@ -271,8 +274,10 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
   `APP_ENV=test` (unless full URLs are given); `.env.example` placeholders are rejected.
   Configuration errors name the variable but never include its value. Logs redact keys
   containing password/token/secret/authorization; Celery prints the broker as `redis://:**@...`.
-- **Redis**: `--requirepass` in compose; the API, worker and readiness check use the
-  authenticated URL built from `REDIS_*`. Unauthenticated commands get `NOAUTH`.
+- **Redis**: password required; compose writes `requirepass` to a 0600 config file at
+  start (not on the command line). The API, worker and readiness check use the
+  authenticated URL built from `REDIS_*`. Unauthenticated commands get `NOAUTH`
+  (verified live).
 - **OpenAI key**: optional; read only when `/ask` needs the LLM
   (`app/ai/factory.py::create_llm_provider`). Neither the OpenAI SDK nor torch is
   imported at API/worker startup. DIP2 specifics: [SECURITY.md](SECURITY.md).
@@ -280,10 +285,11 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 - **Containers**: non-root user (uid 10001); Postgres/Redis are not published to the host.
 - **Retrieval isolation (DIP2)**: chunk queries filter by owner and completed status in
   SQL; `/ask` only sees the caller's chunks.
-- **DIP3**: rate limits, request body limit before parsing, security headers, docs
-  disabled in production, production config checks, compose `cap_drop`/`no-new-privileges`.
+- **DIP3 + final**: rate limits (fail-closed for credentials), request body limit
+  before parsing, security headers, docs disabled in production, production config
+  checks, compose `cap_drop`/`no-new-privileges`, images pinned by digest.
 - **Not yet**: account lockout, token revocation, refresh tokens, malware scanning,
-  parser sandboxing, read-only root filesystem, image digest pinning.
+  parser sandboxing, read-only root filesystem, image vulnerability scanning.
 
 ## Observability
 
@@ -293,22 +299,31 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
   generated; always echoed on the response and included in error bodies. The upload's
   request id is passed to the Celery task so worker logs share it.
 - `GET /health` and `GET /health/live` (liveness, no I/O), `GET /health/ready`
-  (PostgreSQL `SELECT 1`, authenticated Redis `PING`, 503 if either fails).
+  (PostgreSQL `SELECT 1`, pgvector installed and >= 0.5.0, authenticated Redis `PING`;
+  503 if any fails).
 - DIP3: Prometheus metrics at `GET /metrics` (API) and on `WORKER_METRICS_PORT` (worker,
   multiprocess mode). Metric list: [observability.md](observability.md).
 
-## Worker reliability (DIP3)
+## Worker reliability (DIP3 + final)
 
 - Soft time limit (`CELERY_TASK_SOFT_TIME_LIMIT`, 240 s) raises `SoftTimeLimitExceeded`
   inside the task; the job fails with "Processing took too long and was stopped".
 - A hard kill (300 s) with `acks_late` + `reject_on_worker_lost` redelivers the message;
   the claim step fails the job once `attempts` exceeds `max_retries + 1 + 2`, so a file
   that always kills the worker cannot loop forever.
-- A database error while recording the final state is raised as a transient error, so
-  Celery retries instead of leaving the job silently stuck; terminal jobs are not
-  rewritten on redelivery.
+- Transient errors (database, storage, network) are retried with backoff; on the final
+  attempt the job and document are marked `failed` ("Processing failed after several
+  attempts") instead of scheduling another retry. If the database is still down at that
+  point the failure is logged (`job.terminal_state_not_persisted`) and left to the
+  reconciler. Terminal jobs are not rewritten on redelivery.
+- Stale-job reconciler (`app/workers/reconcile.py`): Celery beat embedded in the worker
+  runs `jobs.reconcile_stale` every `STALE_JOB_CHECK_INTERVAL_SECONDS` (300 s) and fails
+  jobs still `processing` (by `started_at`) or `retrying` (by `updated_at`) after
+  `STALE_JOB_TIMEOUT_SECONDS` (900 s). Rows are locked with `FOR UPDATE SKIP LOCKED`
+  (job and document), so it never blocks or races a live worker or reprocess request.
+  Also available as `python -m app.cli reconcile-stale-jobs`.
 - `reprocess` locks the document row (`SELECT ... FOR UPDATE`) so two concurrent
-  requests cannot both create a job.
+  requests cannot both create a job (concurrency test: exactly one 202 and one 409).
 
 ## Integration points for later stages
 
@@ -321,5 +336,5 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 | Later | OCR for scanned PDFs | fallback in `app/processing/extraction.py::PdfExtractor` |
 | DIP3 (done) | Rate limiting dependency | `app/api/dependencies/rate_limit.py`, `app/core/rate_limit.py` |
 | DIP3 (done) | Metrics | `app/core/metrics.py`, `app/core/middleware.py`, `app/api/routes/metrics.py` |
-| DIP3 (done, not run) | CI | `.github/workflows/ci.yml` |
+| DIP3 (done; linted and run locally, never on GitHub) | CI | `.github/workflows/ci.yml` |
 | Later | Tracing | wrap `RequestContextMiddleware` / pipeline steps with OpenTelemetry spans |

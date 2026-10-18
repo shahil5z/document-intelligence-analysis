@@ -123,7 +123,20 @@ body (tested with captured logs).
 `LLM_PROVIDER=none` or a missing/placeholder `OPENAI_API_KEY` -> `/ask` returns 503
 "Question answering is not configured" (after retrieval, so insufficient-evidence
 answers still work without an LLM). Nothing contacts the LLM at startup, in health
-checks or in tests (tests inject `MockLLM`).
+checks or in tests (tests inject `MockLLM`). The provider is created lazily and cached
+per configuration (one connection pool per process).
+
+Some reasoning-model endpoints reject `max_tokens` or a non-default `temperature`;
+with such a model `/ask` returns 503 and the log shows the upstream HTTP status. Use a
+chat model (default `gpt-4o-mini`) or an endpoint that accepts these parameters.
+
+### Verification
+
+| Path | Status |
+| --- | --- |
+| Evidence gate, citation validation, injection escaping, LLM errors -> 503 | PASS (unit/API tests with `MockLLM`) |
+| Full HTTP path through `OpenAICompatibleLLMProvider` in Docker | PASS against the local stub (`docker-compose.stub-llm.yml`): answer with `[S1]`, forged `[S99]` removed, off-topic question answered as insufficient evidence without an LLM call |
+| Real OpenAI model | NOT VERIFIED in this environment (the key exists only on the user's PC). Procedure: [manual-testing.md](manual-testing.md#real-openai-test-optional-costs-money) and `scripts/smoke_test.py --real-llm` |
 
 ## Response
 

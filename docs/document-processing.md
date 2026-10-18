@@ -48,15 +48,17 @@ the final index step.
 | PDF without a text layer (scan) or document with only whitespace | `failed`: "No extractable text was found. Scanned documents and images are not supported (OCR is not implemented)." | no |
 | More than `MAX_CHUNKS_PER_DOCUMENT` chunks | `failed`: "The document is too large to index (more than N chunks)" | no |
 | Embedding model dimension differs from `EMBEDDING_DIMENSION` | `failed`: "Embedding is misconfigured on the server; contact the administrator" | no |
-| `OSError` (e.g. model download/network), database `OperationalError`, storage errors | job `retrying`, document `queued`, Celery retry with exponential backoff; after `CELERY_TASK_MAX_RETRIES` -> `failed`: "Processing failed after several attempts" | yes |
+| `OSError` (e.g. model download/network), database `OperationalError`, storage errors | job `retrying`, document `queued`, Celery retry with exponential backoff; on the final attempt the job and document are marked `failed`: "Processing failed after several attempts" (no further retry is scheduled) | yes, bounded |
 | Any other exception | `failed`: "Processing failed due to an internal error" (details only in logs) | no |
-| Celery soft time limit (240 s) | `SoftTimeLimitExceeded` is raised wherever the code is; in the compose run it fired inside a Hugging Face download and surfaced as `OSError`, so the attempt was retried. Raised elsewhere it is treated as an internal error. | depends |
+| Celery soft time limit (240 s) | `SoftTimeLimitExceeded` raised in the pipeline -> `failed`: "Processing took too long and was stopped". When it fires inside a network call (e.g. a Hugging Face download) the library may surface it as `OSError`, which is retried; observed in the final compose run with no internet: 4 attempts, then `failed` "Processing failed after several attempts". | depends |
+| Hard time limit (300 s) / worker crash | task redelivered (`acks_late`) and re-claimed, at most `CELERY_TASK_MAX_RETRIES + 3` claims, then `failed` | bounded |
+| Job still `processing` / `retrying` after `STALE_JOB_TIMEOUT_SECONDS` (900 s), e.g. the database was down on the final attempt | the stale-job reconciler (worker beat, every 300 s) marks it `failed`: "Processing stopped responding and was marked as failed; reprocess to retry" | reprocess |
 | Document deleted while processing | index step finds no row and skips; nothing is left behind | - |
 
 Parser exception messages are never stored or returned; logs record only the exception
-type. A document therefore never stays in `processing` after an attempt ends, with one
-DIP1 caveat: if Celery's hard time limit (300 s) kills the worker process, the task is
-re-delivered (`acks_late`) and the job is re-claimed (see Known limitations).
+type. Every job reaches a terminal state: attempts and claims are bounded, and the
+reconciler (`app/workers/reconcile.py`, `FOR UPDATE SKIP LOCKED` on job and document,
+so it never races a live worker or a reprocess request) fails anything left behind.
 
 ## Extraction (`app/processing/extraction.py`)
 
@@ -66,7 +68,7 @@ re-delivered (`acks_late`) and the job is re-claimed (see Known limitations).
 | Format | Library | Notes |
 | --- | --- | --- |
 | PDF | `pypdf` (`strict=False`) | One `PageText` per page with 1-based page numbers; empty pages are kept as empty text so numbering stays correct; a page that fails to extract becomes empty and adds a warning. Encrypted PDFs: an empty user password is tried, otherwise rejected. |
-| DOCX | `python-docx` | Paragraphs and tables in document order (`iter_inner_content`); table rows become `cell | cell`; merged-cell duplicates removed. No page numbers (DOCX pagination happens at render time), so `page_start/page_end` are `null`. ZIP total uncompressed size is checked before parsing. |
+| DOCX | `python-docx` | Body paragraphs and tables in document order (`iter_inner_content`); table rows become `cell | cell`; merged-cell duplicates removed. **Not extracted:** headers, footers, footnotes/endnotes, comments, text boxes and other shapes, embedded objects. Legacy `.doc` is not supported. No page numbers (DOCX pagination happens at render time), so `page_start/page_end` are `null`. ZIP total uncompressed size is checked before parsing; upload validation checks only the ZIP signature. |
 | TXT | stdlib | BOM detection (UTF-8, UTF-16), then strict UTF-8, then cp1252 with replacement (recorded as a warning). NUL bytes without a BOM -> rejected as binary. |
 
 `DocumentContent` holds `pages`, `source_format`, `page_count` and `warnings`;

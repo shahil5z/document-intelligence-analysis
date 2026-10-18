@@ -72,8 +72,14 @@ question rarely matches any chunk because every stemmed word must be present; wi
 
 Semantic queries set `hnsw.iterative_scan = strict_order` and `hnsw.ef_search =
 max(40, 2*k)` for the transaction: with the owner/status filters, a plain HNSW scan can
-return fewer than `k` rows; iterative scans (pgvector >= 0.8; the image runs 0.8.x) keep
-scanning. Effect not measured at scale.
+return fewer than `k` rows; iterative scans (pgvector >= 0.8; the pinned image runs
+0.8.7) keep scanning. On pgvector 0.5-0.7 the setting is unknown: search detects that,
+logs `search.pgvector_iterative_scan_unsupported` and runs a plain HNSW scan (verified:
+all 129 database-backed tests pass on pgvector 0.6.2). Below 0.5.0 (no HNSW) readiness
+fails. Effect of the fallback at scale: not measured.
+
+Latency on the compose stack (21 one-chunk documents, sequential client): semantic p50
+27 ms, keyword 6 ms, hybrid 28 ms ([performance.md](performance.md)).
 
 ## Hybrid: Reciprocal Rank Fusion
 

@@ -1,5 +1,16 @@
 # DIP1 hand-off: backend foundation
 
+> **Historical stage record.** The numbers and NOT VERIFIED items below describe the
+> state at the end of this stage and are kept unchanged as history. The current,
+> verified state of the whole system (tests, Docker, CI, security, benchmark) is in
+> [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md); where this file disagrees with
+> it, the final report and the code win.
+>
+> Superseded since DIP1: Redis no longer receives `--requirepass` on the command line
+> (0600 config file); rate limits, metrics and hardening were added in DIP3; the
+> stale-job reconciler and terminal failure on retry exhaustion were added in the
+> final phase; the "DIP2" plan section is implemented (see DIP2_HANDOFF.md).
+
 This is the single hand-off document for DIP1 and the starting point for DIP2
 (it replaces the former `DIP2_HANDOFF.md`). DIP3 specifics are in
 [DIP3_HANDOFF.md](DIP3_HANDOFF.md). Everything listed as implemented was executed;

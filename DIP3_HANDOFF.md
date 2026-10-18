@@ -1,5 +1,21 @@
 # DIP3 handoff: production hardening
 
+> **Historical stage record.** The numbers and NOT VERIFIED items below describe the
+> state at the end of this stage and are kept unchanged as history. The current,
+> verified state of the whole system (tests, Docker, CI, security, benchmark) is in
+> [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md); where this file disagrees with
+> it, the final report and the code win.
+>
+> Corrections found in the final audit: the DIP3 work was later committed as
+> `6b054d3` (wip snapshot) on branch `final`, not left uncommitted on `dip2`; CI
+> listed a non-existent `dip3` branch (now `main`, `dip2`, `final`). Items this file
+> marks NOT VERIFIED / NOT IMPLEMENTED that are now done: Docker build and compose run,
+> real-Redis rate limiting, worker metrics exporter, readiness with real Redis,
+> pgvector >= 0.8 path, digest pinning, stuck-job reaper (reconciler), Redis password
+> off the command line. Rate limits now fail **closed** for login/register. The
+> 330 passed / 3 skipped result is the DIP3 Windows run; the final run is 364 passed,
+> 0 skipped, 96%.
+
 Status on 2026-10-18: implemented in the working tree of branch `dip2` (**uncommitted**,
 no remote). Verified on Windows 11 with Python 3.12.15, a local PostgreSQL 16.2 +
 pgvector 0.6.2 (no Docker) and no Redis. Everything that needs Docker, Redis, a real
