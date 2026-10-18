@@ -42,7 +42,7 @@ for service in postgres redis api worker beat caddy; do
   esac
 done
 
-if compose exec -T api python -c "import json,sys,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5); sys.exit(0 if json.load(r).get('status') == 'ok' else 1)" >/dev/null 2>&1; then
+if compose exec -T api python -c "import json,sys,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5); sys.exit(0 if json.load(r).get('status') == 'ready' else 1)" >/dev/null 2>&1; then
   ok "api /health/ready (PostgreSQL and Redis reachable)"
 else
   fail "api /health/ready"

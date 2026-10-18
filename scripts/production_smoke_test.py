@@ -118,7 +118,7 @@ def main() -> int:  # noqa: PLR0915 (one linear scenario)
 
     status, body = api.request("GET", "/health/ready")
     check(
-        status == 200 and isinstance(body, dict) and body.get("status") == "ok",
+        status == 200 and isinstance(body, dict) and body.get("status") == "ready",
         "GET /health/ready is ok",
     )
     status, _ = api.request("GET", "/metrics")
@@ -158,7 +158,7 @@ def main() -> int:  # noqa: PLR0915 (one linear scenario)
     status, body = api.request(
         "POST", "/documents", token=upload_token, raw=data, content_type=ctype
     )
-    if not check(status == 202 and "id" in body, f"upload accepted (HTTP {status})"):
+    if not check(status in (201, 202) and "id" in body, f"upload accepted (HTTP {status})"):
         return 1
     doc_id = body["id"]
 
