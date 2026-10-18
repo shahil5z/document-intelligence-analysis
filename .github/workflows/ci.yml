@@ -6,7 +6,7 @@ name: ci
 
 on:
   push:
-    branches: [main, dip2, dip3]
+    branches: [main, dip2, final]
   pull_request:
 
 permissions:
@@ -27,6 +27,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Lint workflow files (actionlint)
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
       - uses: astral-sh/setup-uv@v6
         with:
           version: ${{ env.UV_VERSION }}
@@ -43,7 +45,8 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        # Same digest as docker-compose.yml (pgvector/pgvector:pg16).
+        image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
         env:
           POSTGRES_USER: dip
           POSTGRES_PASSWORD: ci-only-postgres-password
@@ -60,9 +63,10 @@ jobs:
           REDIS_PASSWORD="$(openssl rand -hex 24)"
           echo "::add-mask::$REDIS_PASSWORD"
           echo "TEST_REDIS_URL=redis://:${REDIS_PASSWORD}@localhost:6379/0" >> "$GITHUB_ENV"
-          docker run -d --name redis -p 6379:6379 redis:7-alpine \
+          docker run -d --name redis -p 6379:6379 \
+            redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 \
             redis-server --requirepass "$REDIS_PASSWORD"
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" redis redis-cli ping | grep -q PONG && break
             sleep 1
           done
