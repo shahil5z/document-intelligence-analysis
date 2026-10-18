@@ -127,8 +127,11 @@ class Settings(BaseSettings):
     max_top_k: int = Field(default=20, ge=1, le=100)
     candidate_k: int = Field(default=40, ge=1, le=1000)
     max_query_length: int = Field(default=1000, ge=1, le=10_000)
-    # Cosine similarity a retrieved chunk needs to count as evidence for /ask.
-    min_evidence_similarity: float = Field(default=0.55, ge=-1.0, le=1.0)
+    # Cosine similarity a retrieved chunk needs to count as evidence for /ask. 0.48 sits
+    # between the highest off-topic (0.451) and lowest on-topic (0.507) top-1 similarity
+    # measured with bge-small-en-v1.5 on the small synthetic set (docs/rag.md); recalibrate
+    # when the model or the corpus changes.
+    min_evidence_similarity: float = Field(default=0.48, ge=-1.0, le=1.0)
 
     reranking_enabled: bool = False
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
