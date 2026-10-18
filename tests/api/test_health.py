@@ -5,7 +5,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.db.session import get_engine
-from app.services.health_service import HealthService, get_health_service
+from app.services.health_service import (
+    HealthService,
+    evaluate_pgvector_version,
+    get_health_service,
+)
 
 
 @pytest.mark.parametrize("path", ["/health", "/health/live"])
@@ -49,4 +53,29 @@ def test_readiness_ok_with_real_redis(app: FastAPI, client: TestClient) -> None:
     )
     response = client.get("/health/ready")
     assert response.status_code == 200
-    assert response.json()["status"] == "ready"
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["checks"]["pgvector"] == {"status": "ok", "error": None}
+
+
+def test_readiness_checks_the_installed_pgvector_version(app: FastAPI, client: TestClient) -> None:
+    del app
+    check = client.get("/health/ready").json()["checks"]["pgvector"]
+    # The test database runs the migrations, so the extension is installed (>= 0.5.0).
+    assert check["status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    ("version", "status", "error"),
+    [
+        (None, "error", "pgvector extension is not installed"),
+        ("0.4.4", "error", "pgvector >= 0.5.0 is required"),
+        ("0.5.0", "ok", None),
+        ("0.6.2", "ok", None),
+        ("0.8.0", "ok", None),
+        ("0.8.7", "ok", None),
+    ],
+)
+def test_pgvector_version_policy(version: str | None, status: str, error: str | None) -> None:
+    check = evaluate_pgvector_version(version)
+    assert (check.status, check.error) == (status, error)

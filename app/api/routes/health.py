@@ -35,7 +35,10 @@ def liveness_live() -> LivenessResponse:
     "/ready",
     response_model=ReadinessResponse,
     summary="Readiness probe",
-    description="Runs `SELECT 1` on PostgreSQL and `PING` on Redis. Returns 503 if either fails.",
+    description=(
+        "Runs `SELECT 1` on PostgreSQL, checks that the pgvector extension is installed in "
+        "version 0.5.0 or newer, and sends `PING` to Redis. Returns 503 if any check fails."
+    ),
     responses={503: {"model": ReadinessResponse, "description": "A dependency is unavailable"}},
 )
 def readiness(
@@ -43,6 +46,7 @@ def readiness(
 ) -> JSONResponse:
     checks: dict[str, DependencyCheck] = {
         "database": health.check_database(),
+        "pgvector": health.check_pgvector(),
         "redis": health.check_redis(),
     }
     ready = all(check.status == "ok" for check in checks.values())

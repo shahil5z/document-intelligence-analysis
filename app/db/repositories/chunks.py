@@ -44,6 +44,10 @@ _REGCONFIG: ColumnClause[Any] = literal_column(f"'{TEXT_SEARCH_CONFIG}'::regconf
 # parameter ("hnsw" is a reserved prefix), so it is only set when supported; the result
 # is cached per database URL (password hidden) for the life of the process.
 ITERATIVE_SCAN_MIN_VERSION = (0, 8, 0)
+# Minimum supported pgvector: HNSW indexes (migration 0002) exist from 0.5.0. Below 0.8.0
+# filtered semantic searches may return fewer than top_k rows (no iterative scan); the
+# readiness probe reports versions below 0.5.0 (or a missing extension) as an error.
+PGVECTOR_MIN_VERSION = (0, 5, 0)
 _iterative_scan_support: dict[str, bool] = {}
 _support_lock = threading.Lock()
 
