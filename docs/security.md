@@ -1,6 +1,7 @@
 # Security
 
-Scope: the final system (DIP1 + DIP2 + DIP3 + final fixes). Every control below names
+Scope: the final system (DIP1 + DIP2 + DIP3 + final fixes + production phase: Next.js
+frontend, production compose, Caddy, ops scripts). Every control below names
 where it lives and what tests it. Verification numbers are in
 [FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md).
 
@@ -125,7 +126,8 @@ is no entailment or second-pass check.
 ## Containers and supply chain
 
 - Base images pinned by multi-arch index digest (Dockerfile, compose, CI); bump
-  procedure in [deployment.md](deployment.md#image-digests).
+  procedure in [deployment.md](deployment.md#image-digests). Caddy is pinned the same way
+  (`caddy:2-alpine@sha256:d8542f48...`).
 - App containers run as uid 10001 with `cap_drop: [ALL]`, `no-new-privileges`, `init`.
   Postgres, Redis and the worker exporter are not published to the host.
 - `pip-audit` on the locked dependencies: no known vulnerabilities (torch skipped by the
@@ -133,8 +135,60 @@ is no entailment or second-pass check.
 - Embedding model: downloaded from Hugging Face on first use; the revision is not
   pinned. Seed the cache and set `HF_HUB_OFFLINE=1` to stop network access.
 
+## Frontend sessions (BFF) and uploads
+
+Decision record: [ADR-006](adr/ADR-006-frontend-auth-bff.md).
+
+- The JWT is stored only in the `dip_session` cookie: `HttpOnly`, `SameSite=Lax`,
+  `Path=/`, `Secure` on HTTPS, lifetime = token lifetime - 30 s. It is never exposed to
+  browser JavaScript, never in `localStorage`/`sessionStorage`, never in a URL, never
+  logged. Verified by Playwright (cookie flags, empty web storage, no token in the page).
+- CSRF: every state-changing route handler requires `X-DIP-CSRF: 1` **and** an `Origin`
+  equal to the host; SameSite=Lax blocks cross-site cookie sends on POST as a second
+  layer. Playwright asserts a 403 without the header.
+- `/api/proxy/[...path]` forwards only an allow-list of API paths and methods, only the
+  `page`/`page_size` query parameters, and JSON bodies up to 32 KiB.
+- Uploads go browser -> API directly with a **300-second upload-only token**
+  (`type=upload`): the API accepts it only on `POST /documents`; every other endpoint
+  answers 401 (unit/API tests + smoke test). Normal access tokens still work for uploads.
+- Errors shown to users come from a fixed mapping (`frontend/src/lib/errors.ts`); raw
+  server messages and stack traces are not rendered.
+- Security headers from `next.config.ts`: CSP (`default-src 'self'`, `connect-src 'self'
+  <API URL>`, `frame-ancestors 'none'`, `object-src 'none'`; `script-src` needs
+  `'unsafe-inline'` for Next.js bootstrap scripts), nosniff, `X-Frame-Options: DENY`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, COOP
+  same-origin, `Cache-Control: no-store` on `/api/*`.
+- Only `NEXT_PUBLIC_API_URL` is exposed to the browser bundle; no secret uses the
+  `NEXT_PUBLIC_` prefix (checked in the `.next` output, see the report).
+
+## Production edge and server
+
+- Caddy terminates TLS (automatic ACME certificates), redirects HTTP to HTTPS, serves
+  HTTP/1.1 + HTTP/2 only, has its admin API off, answers `/metrics` with 404 and rejects
+  bodies above 11 MB before they reach the API. Only 80/443 are published.
+- PostgreSQL and Redis sit on an `internal: true` network: no published ports, no
+  internet route. The API port 8000 and the worker exporter 9100 are internal only.
+- CORS is restricted to the configured frontend origin(s) (`CORS_ALLOWED_ORIGINS`,
+  https only in production).
+- Public-demo rate limits in `docker-compose.prod.yml` (register 10/hour, login
+  10/minute + 5/minute per e-mail, upload 30/day, search 60/minute, ask 20/hour,
+  reprocess 20/day). Behind Vercel the per-IP limits count Vercel egress IPs.
+- Missing `OPENAI_API_KEY` is not an error: `/ask` answers 503 "not configured", the
+  rest works.
+- `.env.production` must be mode 0600 (the scripts warn otherwise) and is git-ignored;
+  the scripts refuse `<placeholder>` values and read single keys without `source`-ing
+  the file. Backups are 0600 in a 0700 directory, optionally GPG-encrypted.
+- `setup_server.sh` opens only 22/80/443 and leaves the SSH daemon configuration alone
+  (disable password login yourself if your image allows it). Deploys over SSH from
+  GitHub use a dedicated key and a pinned `known_hosts` (`StrictHostKeyChecking=yes`).
+- `restore_postgres.sh` never overwrites the live database without
+  `--replace-live-database --i-understand-this-overwrites-data` and a safety backup.
+
 ## Open gaps
 
 Fixed windows allow bursts at window edges; upload rate limit after body receipt;
 unauthenticated `/metrics`; no token revocation; no parser sandbox; no image scan;
-model revision not pinned; Redis password visible via `docker inspect`.
+model revision not pinned; Redis password visible via `docker inspect`; per-IP limits
+see Vercel egress IPs when called through the BFF; no refresh tokens (sessions end
+with the 30-minute token); CSP allows inline scripts; no WAF or DDoS protection beyond
+rate limits on a single VM.

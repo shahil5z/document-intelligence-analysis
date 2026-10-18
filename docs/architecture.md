@@ -2,7 +2,7 @@
 
 Status: DIP1 (backend foundation) + DIP2 (document intelligence: extraction, chunking,
 embeddings, retrieval, `/ask`) + DIP3 (production hardening). Details of DIP2 parts: [document-processing.md](document-processing.md),
-[retrieval.md](retrieval.md), [rag.md](rag.md), [SECURITY.md](SECURITY.md). DIP3:
+[retrieval.md](retrieval.md), [rag.md](rag.md), [security.md](security.md). DIP3:
 [observability.md](observability.md), [testing.md](testing.md),
 [deployment.md](deployment.md), [performance.md](performance.md).
 
@@ -27,7 +27,7 @@ Redis (`INCR` + `EXPIRE`, key `dip:rl:{scope}:{window}:{sha256(identifier)}`), o
 memory for tests. On Redis errors the limiter raises `RateLimiterUnavailableError`;
 the dependency fails **closed** (503 + `Retry-After`) for register/login and **open**
 for authenticated endpoints, counting both in
-`dip_rate_limiter_errors_total{scope,decision}` ([SECURITY.md](SECURITY.md#rate-limiting)).
+`dip_rate_limiter_errors_total{scope,decision}` ([security.md](security.md#rate-limiting)).
 
 ## System overview
 
@@ -280,7 +280,7 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
   (verified live).
 - **OpenAI key**: optional; read only when `/ask` needs the LLM
   (`app/ai/factory.py::create_llm_provider`). Neither the OpenAI SDK nor torch is
-  imported at API/worker startup. DIP2 specifics: [SECURITY.md](SECURITY.md).
+  imported at API/worker startup. DIP2 specifics: [security.md](security.md).
 - **CORS**: explicit origins only; `*` rejected at startup.
 - **Containers**: non-root user (uid 10001); Postgres/Redis are not published to the host.
 - **Retrieval isolation (DIP2)**: chunk queries filter by owner and completed status in

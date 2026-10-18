@@ -1,32 +1,62 @@
 # Document Intelligence Platform
 
-Backend that ingests PDF, DOCX and TXT documents, turns them into searchable chunks
-with local embeddings, and answers questions with citations that point at the passages
-that were actually retrieved. Every query is scoped to the document owner inside SQL.
+## 1. Overview
 
-Built in three stages and consolidated on the `final` branch:
+A multi-tenant document question-answering system. Users upload PDF, DOCX and TXT
+files; a background worker extracts, chunks and embeds the text locally; users search
+their own documents (semantic, keyword or hybrid) and ask questions that are answered
+only from retrieved passages, with citations that point at those passages. Every query
+is scoped to the document owner inside SQL.
 
-| Stage | Scope |
+- **Backend**: FastAPI + PostgreSQL/pgvector + Redis + Celery (DIP1-DIP3, `final`).
+- **Frontend**: Next.js App Router in [`frontend/`](frontend) (production phase).
+- **Production setup**: `docker-compose.prod.yml` + Caddy for a single Oracle Cloud
+  Always Free Ampere VM, frontend on Vercel, ops scripts, CI/CD workflows.
+
+What was verified, with numbers, is in [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md)
+(the single source of truth). OCR is **not implemented**: scanned PDFs fail with an
+explicit message.
+
+## 2. Screenshots
+
+Taken by the Playwright suite against the local production-like stack
+(`docker-compose.prod.yml` behind Caddy with a local CA; `/ask` answered by the local
+**stub** LLM, not OpenAI).
+
+| | |
 | --- | --- |
-| **DIP1** | Auth (JWT, Argon2id, roles), uploads + validation, local storage, Celery job pipeline with an explicit state machine, audit log, JSON logs, Docker |
-| **DIP2** | Text extraction, normalization, token-aware chunking, local embeddings in pgvector, semantic / keyword / hybrid (RRF) search, `/ask` with validated citations |
-| **DIP3 + final** | Rate limiting (fail-closed for credentials), body limits before parsing, security headers, Prometheus metrics (API + worker), worker reliability (bounded retries, terminal failure, stale-job reconciler), pinned images, CI workflow, smoke test, benchmark |
+| Landing ![landing](docs/screenshots/landing.png) | Dashboard ![dashboard](docs/screenshots/dashboard.png) |
+| Upload ![upload](docs/screenshots/upload.png) | Documents ![documents](docs/screenshots/documents.png) |
+| Document detail ![detail](docs/screenshots/document-detail.png) | Search ![search](docs/screenshots/search.png) |
+| Ask (stub LLM) ![ask](docs/screenshots/ask.png) | Architecture ![architecture](docs/screenshots/architecture.png) |
+| Mobile ![mobile](docs/screenshots/mobile-dashboard.png) | |
 
-What was verified, with numbers, is in [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md).
-OCR is **not implemented**: scanned PDFs fail with an explicit message.
+## 3. Live demo
 
-## Architecture
+**Not deployed yet.** There is no public URL. Everything needed is configured
+(compose file, Caddy, scripts, workflows, docs); the remaining steps need the owner's
+Oracle Cloud, Vercel and GitHub accounts: [MANUAL_DEPLOYMENT_CHECKLIST.md](MANUAL_DEPLOYMENT_CHECKLIST.md).
+
+| | URL |
+| --- | --- |
+| Frontend (Vercel) | not deployed |
+| API (Oracle VM) | not deployed |
+
+## 4. Architecture
 
 ```mermaid
 flowchart LR
-    client[Client] --> api[FastAPI API]
+    user[Browser] -->|pages, /api/auth, /api/proxy| next[Next.js BFF<br/>HttpOnly session cookie]
+    next -->|Bearer JWT| api[FastAPI API]
+    user -->|direct upload, 300 s upload-only token| api
     api --> pg[(PostgreSQL 16 + pgvector)]
     api --> redis[(Redis: broker + rate limits)]
-    api --> storage[[File storage volume]]
-    worker[Celery worker + beat] --> redis
+    api --> files[[Storage: volume or OCI Object Storage]]
+    worker[Celery worker] --> redis
     worker -->|chunks + vectors| pg
-    worker --> storage
-    worker --> model[[bge-small-en-v1.5, local]]
+    worker --> files
+    beat[Celery beat] -->|stale-job reconciler| redis
+    worker --> model[[bge-small-en-v1.5, local CPU]]
     api --> model
     api -->|/ask only| llm[OpenAI-compatible LLM]
 ```
@@ -36,74 +66,115 @@ SQLAlchemy models. An upload creates a processing job; the worker runs integrity
 -> extract -> normalize -> chunk -> embed -> index. Details:
 [docs/architecture.md](docs/architecture.md), decisions in [docs/adr/](docs/adr).
 
-Stack: Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (sync, psycopg 3), Alembic,
+## 5. Features
+
+- Accounts: register/login (Argon2id, JWT), roles, admin endpoints, audit log.
+- Uploads: PDF/DOCX/TXT up to 10 MB, extension + MIME + magic-byte checks, per-user
+  duplicate detection; storage on a local volume, any S3-compatible service, or OCI
+  Object Storage.
+- Processing: Celery pipeline with an explicit state machine, bounded retries, terminal
+  failure, stale-job reconciler; token-aware chunking; local 384-d embeddings.
+- Retrieval: semantic (HNSW), keyword (PostgreSQL full-text) and hybrid (RRF), optional
+  cross-encoder reranking.
+- `/ask`: grounded answers with validated `[S#]` citations; "insufficient evidence"
+  without calling the LLM when retrieval is weak; works (503 "not configured") without
+  an OpenAI key.
+- Hardening: rate limits (fail-closed for credentials), body limits before parsing,
+  security headers, Prometheus metrics, JSON logs without secrets or document text.
+- Frontend: landing, login, register, dashboard, upload (progress bar), documents list,
+  document detail (status, job, reprocess, delete), search, ask with citations,
+  architecture page, settings/logout; skeletons, empty states, friendly errors, mobile
+  layout.
+
+API endpoints:
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/health`, `/health/live` | - | liveness |
+| GET | `/health/ready` | - | PostgreSQL, pgvector version, Redis (503 if any fails) |
+| POST | `/auth/register`, `/auth/login`, `/auth/token` | - | register; JSON login; OAuth2 form login |
+| GET | `/auth/me` | user | current user |
+| POST | `/auth/upload-token` | user | 300 s token valid only for `POST /documents` (browser direct upload) |
+| GET | `/documents/upload-policy` | user | allowed extensions/types and the size limit |
+| POST | `/documents` | user or upload token | multipart upload (201), queues processing |
+| GET | `/documents`, `/documents/{id}`, `/documents/{id}/status` | user | list (paginated), metadata, status + latest job + chunk count |
+| POST | `/documents/{id}/reprocess` | user | new job for a completed/failed document (202; 409 while busy) |
+| DELETE | `/documents/{id}` | user | delete record, jobs, chunks, file (204) |
+| POST | `/search` | user | semantic / keyword / hybrid over own completed documents |
+| POST | `/ask` | user | grounded answer with citations; insufficient-evidence answer without an LLM call; 503 if the LLM fails |
+| GET | `/audit-logs/me` | user | own audit entries |
+| GET | `/admin/users`, `/admin/audit-logs` | admin | all users / audit entries |
+| GET | `/metrics` | - | Prometheus (internal network only) |
+
+Errors: `{"error": {"code": "not_found", "message": "Document not found", "request_id": "..."}}`.
+Other users' documents return 404, never 403.
+
+## 6. Stack
+
+Backend: Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (sync, psycopg 3), Alembic,
 PostgreSQL 16 + pgvector (HNSW) + full-text search, Redis 7, Celery 5, PyJWT, pwdlib
-(Argon2id), pypdf, python-docx, sentence-transformers (CPU torch), httpx2, uv, pytest,
-ruff, mypy (strict), Docker Compose.
+(Argon2id), pypdf, python-docx, sentence-transformers (CPU torch), boto3, httpx2,
+gunicorn + uvicorn-worker, uv, pytest, ruff, mypy (strict).
+Frontend: Next.js 16 (App Router), React, TypeScript, Tailwind CSS 4, ESLint,
+Playwright. Infrastructure: Docker Compose, Caddy 2, GitHub Actions, Oracle Cloud
+(Ampere A1), Vercel.
 
-## Quick start on Windows
+## 7. Local setup
 
-Two routes. Both start from a clone of the repository in PowerShell 7 and a `.env`.
-
-### Step 1 - `.env` (both routes)
-
-```powershell
-py -3.12 scripts\generate_env.py                                   # new .env with random secrets
-py -3.12 scripts\generate_env.py --openai-key-file env             # ...and import OPENAI_API_KEY from a file
-py -3.12 scripts\generate_env.py --merge --dry-run                 # existing .env: list keys that are missing
-py -3.12 scripts\generate_env.py --merge                           # ...append them (existing values untouched, .env.bak written)
-```
-
-`generate_env.py` uses only the standard library, prints key **names** only, never
-values, refuses to overwrite an existing `.env` without `--force`, and with `--merge`
-appends missing keys from `.env.example` (generating missing secrets) without changing
-any existing line. `.env`, `env` and `.env.bak` are git-ignored and excluded from the
-Docker build context.
-
-### Route A - Docker Desktop (recommended)
-
-Requirements: Docker Desktop with the WSL 2 backend.
+Full guide (Windows PowerShell and bash): [docs/local-development.md](docs/local-development.md).
 
 ```powershell
-docker compose up --build -d
-docker compose ps                     # postgres, redis, api, worker healthy; migrate exited 0
+py -3.12 scripts\generate_env.py            # .env with random secrets (prints names only)
+docker compose up --build -d                # postgres, redis, migrate, api, worker
 Invoke-RestMethod http://localhost:8000/health/ready
-uv run python scripts/smoke_test.py   # end-to-end check (stdlib only; /ask expected 503 without a key)
+cd frontend; Copy-Item .env.example .env.local; npm ci; npm run dev   # http://localhost:3000
 ```
 
-Services: `postgres`,
-`redis` (password from a 0600 config file, not on the command line), `migrate`
-(`alembic upgrade head`, once), `api` (host port `API_PORT`), `worker` (Celery worker
-with embedded beat for the stale-job reconciler; metrics on 9100 inside the network).
-Postgres, Redis and the worker exporter are not published to the host.
+`generate_env.py --merge` adds missing keys to an existing `.env` without touching
+existing values. Without Docker: `uv sync`, `uv run alembic upgrade head`,
+`uv run uvicorn app.main:app`, and `uv run celery -A app.workers.celery_app:celery_app
+worker -B --pool=solo` (solo pool on Windows). Create an admin with
+`docker compose exec api python -m app.cli create-admin --email admin@example.com`.
 
-The embedding model (~130 MB) is downloaded into the `model_cache` volume on first use,
-so the first document takes longer. If the containers have no internet access, pre-seed
-the volume and set `HF_HUB_OFFLINE=1` ([docs/deployment.md](docs/deployment.md#offline-model-cache)).
+API usage with curl/PowerShell and the full manual checklist:
+[docs/manual-testing.md](docs/manual-testing.md).
 
-### Route B - without Docker
+## 8. Production architecture
 
-Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), PostgreSQL 16 with the
-pgvector extension (>= 0.5.0, 0.8+ recommended), and a Redis 6+ with a password
-(for example Redis in WSL, or Memurai on Windows).
+[docs/production-deployment.md](docs/production-deployment.md). One VM runs
+`docker-compose.prod.yml`: Caddy (only service with published ports, 80/443,
+automatic HTTPS, `/metrics` blocked), the API under gunicorn with 2 uvicorn workers,
+a Celery worker (concurrency 2), a single beat, a one-shot migrate job, and PostgreSQL +
+Redis on an internal-only network. Healthchecks, memory limits sized for 2 OCPU /
+12 GB, rotated logs, demo rate limits, CORS restricted to the Vercel origin. Ops:
+`scripts/setup_server.sh`, `deploy.sh`, `health_check.sh`, `backup_postgres.sh`,
+`restore_postgres.sh`, `production_smoke_test.py`. CI/CD: `.github/workflows/ci.yml`
+and `deploy.yml` (SSH deploy).
 
-```powershell
-uv sync
-# .env: POSTGRES_HOST/PORT/USER/PASSWORD/DB and REDIS_HOST/PORT/PASSWORD point at your services
-uv run alembic upgrade head
-uv run uvicorn app.main:app --port 8000 --no-access-log
-# second terminal: Celery's prefork pool does not work on Windows, use solo
-uv run celery -A app.workers.celery_app:celery_app worker -B --pool=solo --loglevel=INFO
-```
+## 9. Oracle Cloud
 
-Create an administrator (password from `ADMIN_PASSWORD` or a prompt):
+[docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md): Ampere A1 Flex
+(2 OCPU / 12 GB) in the home region, security list + host iptables for 80/443, a
+hostname via your domain, sslip.io/nip.io or DuckDNS, optional OCI Object Storage via
+the S3 compatibility API. Oracle Always Free resources are available for the life of
+the account within the applicable Always Free limits; idle instances can be
+reclaimed, and A1 capacity can be temporarily unavailable ("Out of host capacity").
+The arm64 image was built and tested under emulation only.
 
-```powershell
-uv run python -m app.cli create-admin --email admin@example.com
-docker compose exec api python -m app.cli create-admin --email admin@example.com
-```
+## 10. Vercel
 
-## Environment variables
+[docs/vercel-deployment.md](docs/vercel-deployment.md): Root Directory `frontend`,
+one environment variable `NEXT_PUBLIC_API_URL=https://<API_DOMAIN>` (public, not a
+secret), then set `CORS_ALLOWED_ORIGINS` on the server to the Vercel URL. Sessions use
+an HttpOnly cookie set by Next.js route handlers ([ADR-006](docs/adr/ADR-006-frontend-auth-bff.md)).
+
+## 11. Environment variables
+
+Production keys (`API_DOMAIN`, `CADDY_TLS`, `CORS_ALLOWED_ORIGINS`, storage, capacity,
+rate limits, backups) are documented in [.env.production.example](.env.production.example)
+and [docs/production-deployment.md](docs/production-deployment.md#environment). The
+frontend reads only `NEXT_PUBLIC_API_URL` ([frontend/.env.example](frontend/.env.example)).
+Backend (`.env`, [.env.example](.env.example)):
 
 Only three values are **mandatory**; everything else has a safe default. All names are
 in [.env.example](.env.example) with comments. Invalid configuration stops startup with
@@ -155,89 +226,11 @@ Further tunables without `.env.example` entries: `DB_POOL_SIZE`, `DB_MAX_OVERFLO
 `OPENAI_EMBEDDING_MODEL`, `OPENAI_TIMEOUT_SECONDS` (legacy; not used by `/ask` or the
 pipeline, which read `LLM_*` and `EMBEDDING_*`).
 
-## Using the API
+S3 / OCI storage: `STORAGE_BACKEND=s3|oci` with `STORAGE_S3_BUCKET`,
+`STORAGE_S3_ENDPOINT_URL`, `STORAGE_S3_REGION`, `STORAGE_S3_ACCESS_KEY_ID`,
+`STORAGE_S3_SECRET_ACCESS_KEY`, `STORAGE_S3_PREFIX`.
 
-Swagger UI at `/docs` (Authorize with the email as username), ReDoc at `/redoc`.
-
-### curl (Linux / macOS / Git Bash)
-
-```bash
-BASE=http://localhost:8000
-curl -s -X POST $BASE/auth/register -H 'Content-Type: application/json' \
-  -d '{"email":"me@example.com","password":"a-long-enough-password"}'
-TOKEN=$(curl -s -X POST $BASE/auth/login -H 'Content-Type: application/json' \
-  -d '{"email":"me@example.com","password":"a-long-enough-password"}' | jq -r .access_token)
-DOC=$(curl -s -X POST $BASE/documents -H "Authorization: Bearer $TOKEN" \
-  -F "file=@policy.pdf;type=application/pdf" | jq -r .id)
-curl -s $BASE/documents/$DOC/status -H "Authorization: Bearer $TOKEN"    # poll until "completed"
-curl -s -X POST $BASE/search -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"query":"refund window","mode":"hybrid","top_k":5}'
-curl -s -X POST $BASE/ask -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"question":"How many days do customers have to return items?"}'
-curl -s -X POST $BASE/documents/$DOC/reprocess -H "Authorization: Bearer $TOKEN"
-```
-
-### PowerShell 7
-
-```powershell
-$base = "http://localhost:8000"
-$cred = @{ email = "me@example.com"; password = "a-long-enough-password" } | ConvertTo-Json
-Invoke-RestMethod -Method Post "$base/auth/register" -ContentType application/json -Body $cred
-$token = (Invoke-RestMethod -Method Post "$base/auth/login" -ContentType application/json -Body $cred).access_token
-$h = @{ Authorization = "Bearer $token" }
-# curl.exe (ships with Windows) sets the part content type; Invoke-RestMethod -Form would send octet-stream (415)
-$doc = curl.exe -s -X POST "$base/documents" -H "Authorization: Bearer $token" -F "file=@policy.pdf;type=application/pdf" | ConvertFrom-Json
-Invoke-RestMethod "$base/documents/$($doc.id)/status" -Headers $h
-$q = @{ query = "refund window"; mode = "hybrid"; top_k = 5 } | ConvertTo-Json
-Invoke-RestMethod -Method Post "$base/search" -Headers $h -ContentType application/json -Body $q
-$a = @{ question = "How many days do customers have to return items?" } | ConvertTo-Json
-Invoke-RestMethod -Method Post "$base/ask" -Headers $h -ContentType application/json -Body $a
-```
-
-The full 26-step manual checklist (including a safe procedure for a real OpenAI key)
-is in [docs/manual-testing.md](docs/manual-testing.md).
-
-| Method | Path | Auth | Purpose |
-| --- | --- | --- | --- |
-| GET | `/health`, `/health/live` | - | liveness |
-| GET | `/health/ready` | - | PostgreSQL, pgvector version, Redis (503 if any fails) |
-| POST | `/auth/register`, `/auth/login`, `/auth/token` | - | register; JSON login; OAuth2 form login |
-| GET | `/auth/me` | user | current user |
-| POST | `/documents` | user | multipart upload (201), queues processing |
-| GET | `/documents`, `/documents/{id}`, `/documents/{id}/status` | user | list (paginated), metadata, status + latest job + chunk count |
-| POST | `/documents/{id}/reprocess` | user | new job for a completed/failed document (202; 409 while busy) |
-| DELETE | `/documents/{id}` | user | delete record, jobs, chunks, file (204) |
-| POST | `/search` | user | semantic / keyword / hybrid over own completed documents |
-| POST | `/ask` | user | grounded answer with citations; insufficient-evidence answer without an LLM call; 503 if the LLM fails |
-| GET | `/audit-logs/me` | user | own audit entries |
-| GET | `/admin/users`, `/admin/audit-logs` | admin | all users / audit entries |
-| GET | `/metrics` | - | Prometheus (internal network only) |
-
-Errors: `{"error": {"code": "not_found", "message": "Document not found", "request_id": "..."}}`.
-Other users' documents return 404, never 403.
-
-## Tests and quality checks
-
-```bash
-uv run ruff check . && uv run ruff format --check . && uv run mypy app tests scripts
-docker run -d --name dip-test-db -e POSTGRES_USER=dip -e POSTGRES_PASSWORD=dip \
-  -e POSTGRES_DB=dip_test -p 5433:5432 pgvector/pgvector:pg16
-export TEST_DATABASE_URL=postgresql+psycopg://dip:dip@localhost:5433/dip_test
-export TEST_REDIS_URL='redis://:<redis-password>@localhost:6380/0'   # optional, real-Redis tests
-uv run pytest --cov=app
-```
-
-PowerShell: `$env:TEST_DATABASE_URL = "postgresql+psycopg://dip:dip@localhost:5433/dip_test"`.
-Without `TEST_DATABASE_URL` the database-backed tests skip. Celery, the embedding model
-and the LLM are replaced by fakes in the suite, so no network is needed. Current numbers
-and what each layer covers: [docs/testing.md](docs/testing.md).
-
-End to end against a running stack: `uv run python scripts/smoke_test.py --base-url
-http://localhost:8000` (add `--ask-expect answer` with an LLM configured, `--real-llm`
-for an explicit real-model check, `--check-rate-limit` for the login limit). For a
-key-free `/ask` path, `docker-compose.stub-llm.yml` adds a local OpenAI-compatible stub.
-
-## Migrations
+## 12. Migrations
 
 ```bash
 uv run alembic upgrade head
@@ -246,30 +239,66 @@ uv run alembic check          # "No new upgrade operations detected."
 
 `0001` creates users, documents, jobs, audit logs and enables `vector`; `0002` adds
 `document_chunks` (`vector(384)` + HNSW cosine index, generated `tsvector` + GIN) and
-`document_processing_jobs.stage`. Never edit an applied revision.
+`document_processing_jobs.stage`. In production `deploy.sh` runs
+`alembic upgrade head` in a one-off `migrate` container before the new API starts.
+Never edit an applied revision.
 
-## Documentation
+## 13. Testing
 
-[architecture](docs/architecture.md) · [document processing](docs/document-processing.md)
-· [retrieval](docs/retrieval.md) · [RAG](docs/rag.md) · [security](docs/SECURITY.md) ·
-[testing](docs/testing.md) · [observability](docs/observability.md) ·
-[performance](docs/performance.md) · [deployment](docs/deployment.md) ·
-[manual testing](docs/manual-testing.md) · [portfolio notes](docs/portfolio.md) ·
-[final report](FINAL_PROJECT_REPORT.md)
+```bash
+uv run ruff check . && uv run ruff format --check . && uv run mypy app tests scripts
+export TEST_DATABASE_URL=postgresql+psycopg://dip:dip@localhost:5433/dip_test   # pgvector/pgvector:pg16
+uv run pytest --cov=app
+cd frontend && npm run lint && npm run typecheck && npm run build
+scripts/e2e_prod_local.sh          # production-like stack + Playwright (bash)
+python3 scripts/production_smoke_test.py --base-url https://<API_DOMAIN> --register
+```
 
-## Known limitations
+Results (numbers in [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md)):
+backend 414 passed, 0 skipped, 96% coverage (real PostgreSQL + pgvector, Redis, S3-compatible server); ruff, format and mypy strict clean; frontend lint/typecheck/build clean; Playwright 10/10 against the production-like stack; production smoke test 13/13 checks. Not run: GitHub Actions, Windows, real OpenAI, real Oracle/Vercel.
+Layers and commands: [docs/testing.md](docs/testing.md).
 
+## 14. Security
+
+[docs/security.md](docs/security.md): owner scoping in SQL (foreign ids -> 404),
+Argon2id, JWT with pinned algorithm/issuer, HttpOnly session cookie + CSRF header and
+origin check in the BFF, upload-only short-lived tokens, rate limits that fail closed
+for credentials, body limits before parsing, prompt-injection containment and citation
+validation, security headers and CSP, internal-only database/Redis/metrics, secrets
+only from the environment (never logged), digest-pinned images, non-root containers.
+
+## 15. Backup and recovery
+
+[docs/backup-and-recovery.md](docs/backup-and-recovery.md):
+`scripts/backup_postgres.sh [--with-files]` (verified `pg_dump -Fc`, checksum, optional
+GPG and bucket copy, retention), `scripts/restore_postgres.sh --into <new db>` for
+non-destructive checks, and `--replace-live-database --i-understand-this-overwrites-data`
+(safety backup first) for real restores. A backup is taken before every deploy.
+
+## 16. Known limitations
+
+- Not deployed: no public URL; Oracle, Vercel, GitHub Actions and real OpenAI were not
+  exercised. arm64 tested under QEMU emulation only.
 - No OCR; scanned PDFs and images fail with an explicit message. DOCX extraction reads
   body paragraphs and tables only (no headers/footers, footnotes, comments, text boxes;
   no legacy `.doc`; no page numbers).
 - Retrieval quality was measured on 18 synthetic queries over 6 short documents; the
-  `/ask` evidence threshold (0.48) was calibrated on that set only.
-- Citations show which retrieved passage the model pointed at; no entailment check.
-- Fixed-window rate limits (bursts up to 2x at window edges); no account lockout,
-  refresh tokens or token revocation. The upload rate limit is checked after the body
-  (at most the upload limit + 64 KiB) has been received.
-- `/metrics` and the worker exporter are unauthenticated; keep them internal.
-- Local filesystem storage only; API and worker must share the volume.
-- The LLM client sends `max_tokens` and `temperature`; some reasoning models reject these.
-- Performance was measured once, on one machine, with small documents
-  ([docs/performance.md](docs/performance.md)); no load or scale testing.
+  `/ask` evidence threshold (0.48) was calibrated on that set only. Citations show which
+  passage the model pointed at; no entailment check.
+- Fixed-window rate limits (bursts up to 2x at window edges); behind the Vercel BFF the
+  per-IP limits count Vercel egress IPs. No refresh tokens, revocation or lockout;
+  sessions end with the 30-minute token.
+- Single VM: no replication, failover or horizontal scaling; backups are on the VM
+  unless copied off. `/metrics` is unauthenticated (internal only).
+- The document detail page shows metadata and processing state, not the document text
+  (the API has no content-preview endpoint).
+- The LLM client sends `max_tokens` and `temperature`; some reasoning models reject them.
+- Performance measured on one machine with small documents; no load testing.
+
+## 17. Future work
+
+OCR for scanned PDFs; streaming `/ask` responses; refresh tokens and revocation;
+a content-preview endpoint with highlighted chunks; per-tenant quotas; background
+virus scanning; managed PostgreSQL or replication; OpenTelemetry tracing; retrieval
+evaluation on real documents; image vulnerability scanning in CI; IaC (Terraform /
+OCI Resource Manager) for the VM and network.
