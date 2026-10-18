@@ -1,0 +1,13 @@
+Payment Service Incident Runbook
+
+Use this runbook when the payment API error rate exceeds 5 percent for more than five minutes or when the on-call engineer is paged by the checkout latency alert.
+
+Step one: acknowledge the page in the paging tool within 10 minutes and open an incident channel named after the date and the service.
+
+Step two: check the status page of the card processor. If the processor reports an outage, enable the fallback processor with the feature flag payments.fallback_enabled and post an update to the status page.
+
+Step three: if the processor is healthy, inspect recent deployments. Roll back the last release of the payment service with the deploy tool if it went out within the previous two hours.
+
+Severity one incidents require an update to stakeholders every 30 minutes. A blameless post-incident review must be written within five working days and shared with the engineering leadership.
+
+Database connection pool exhaustion is a known cause. Restarting the payment workers releases idle connections, but the root cause must still be investigated.

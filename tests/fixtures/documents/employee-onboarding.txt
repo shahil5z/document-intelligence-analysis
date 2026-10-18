@@ -1,0 +1,13 @@
+Employee Onboarding Guide
+
+Welcome to the engineering department. This guide explains what happens during your first two weeks.
+
+On your first day you will meet your onboarding buddy, collect your laptop from the IT desk on the third floor, and complete the security awareness training. The training takes about ninety minutes and must be finished before you receive access to production systems.
+
+Your manager schedules a goals conversation at the end of week one. Together you agree on three objectives for your first ninety days. These objectives are reviewed in the probation review after three months.
+
+Payroll runs on the last working day of each month. New starters who join after the 20th are paid for their first partial month in the following payroll run.
+
+Annual leave entitlement is 25 days per calendar year plus public holidays. Leave accrues monthly, and up to five unused days can be carried over into the next year with manager approval.
+
+All employees must enable two-factor authentication on their email and code hosting accounts during the first week.

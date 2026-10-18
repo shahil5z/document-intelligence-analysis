@@ -1,0 +1,13 @@
+Data Retention and Deletion Standard
+
+This standard defines how long the company keeps personal and operational data.
+
+Customer account data is retained for as long as the account is active. After an account is closed, personal data is deleted within 90 days, except invoices, which are kept for seven years to meet tax obligations.
+
+Application logs that may contain IP addresses are kept for 30 days and then automatically purged. Security audit logs are retained for one year in write-once storage.
+
+Database backups are encrypted with AES-256 and kept for 35 days. Restoring a backup requires approval from two members of the infrastructure team.
+
+When a customer submits an erasure request under GDPR, the privacy team must complete it within one month. The request and its completion date are recorded in the privacy register.
+
+Data stored with subprocessors must follow the same deadlines. Subprocessor contracts include a clause requiring deletion confirmation in writing.

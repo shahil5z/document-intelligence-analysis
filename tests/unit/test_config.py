@@ -143,3 +143,28 @@ def test_csv_lists_are_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _load(app_env="test", jwt_secret_key=STRONG_SECRET)
     assert settings.allowed_extensions == ["pdf", "txt"]
     assert settings.cors_allowed_origins == ["https://app.example.com", "http://localhost:3000"]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"chunk_size": 100, "chunk_overlap": 100}, "CHUNK_OVERLAP must be smaller"),
+        ({"top_k": 30, "max_top_k": 20}, "TOP_K must not exceed MAX_TOP_K"),
+        ({"candidate_k": 5, "max_top_k": 20}, "CANDIDATE_K must be at least MAX_TOP_K"),
+        ({"llm_base_url": "ftp://example.com"}, "LLM_BASE_URL"),
+        ({"llm_provider": "anthropic"}, "LLM_PROVIDER"),
+        ({"embedding_provider": "openai"}, "EMBEDDING_PROVIDER"),
+    ],
+)
+def test_dip2_settings_are_validated(overrides: dict[str, object], message: str) -> None:
+    with pytest.raises(SettingsError, match=message):
+        load_settings(_env_file=None, app_env="test", jwt_secret_key="k" * 40, **overrides)
+
+
+def test_dip2_defaults() -> None:
+    settings = load_settings(_env_file=None, app_env="test", jwt_secret_key="k" * 40)
+    assert settings.embedding_model == "BAAI/bge-small-en-v1.5"
+    assert settings.embedding_dimension == 384
+    assert (settings.chunk_size, settings.chunk_overlap) == (400, 60)
+    assert settings.reranking_enabled is False
+    assert settings.llm_provider == "openai"

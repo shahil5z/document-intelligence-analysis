@@ -1,0 +1,23 @@
+{
+  "description": "Synthetic retrieval evaluation set. A retrieved chunk is relevant when it comes from the listed document and contains the listed phrase (case-insensitive).",
+  "queries": [
+    {"query": "How long do I have to return an item?", "document": "refund-policy.txt", "phrase": "within 30 days of delivery"},
+    {"query": "How do I get my money back for a purchase?", "document": "refund-policy.txt", "phrase": "original payment method"},
+    {"query": "What should I do if my order arrives broken?", "document": "refund-policy.txt", "phrase": "within 48 hours"},
+    {"query": "When do new hires get paid?", "document": "employee-onboarding.txt", "phrase": "last working day of each month"},
+    {"query": "How many vacation days do employees get?", "document": "employee-onboarding.txt", "phrase": "25 days"},
+    {"query": "What training is needed before production access?", "document": "employee-onboarding.txt", "phrase": "security awareness training"},
+    {"query": "How long are invoices kept?", "document": "data-retention.txt", "phrase": "seven years"},
+    {"query": "retention period for application logs with IP addresses", "document": "data-retention.txt", "phrase": "30 days and then automatically purged"},
+    {"query": "deadline for a GDPR erasure request", "document": "data-retention.txt", "phrase": "within one month"},
+    {"query": "What to do when the card processor is down?", "document": "incident-runbook.txt", "phrase": "fallback processor"},
+    {"query": "payments.fallback_enabled", "document": "incident-runbook.txt", "phrase": "payments.fallback_enabled"},
+    {"query": "How often must stakeholders be updated during a sev1?", "document": "incident-runbook.txt", "phrase": "every 30 minutes"},
+    {"query": "Can I fly business class?", "document": "travel-expenses.txt", "phrase": "Business class"},
+    {"query": "hotel reimbursement limit per night", "document": "travel-expenses.txt", "phrase": "180 euros"},
+    {"query": "mileage rate for using my own car", "document": "travel-expenses.txt", "phrase": "0.30 euros per kilometre"},
+    {"query": "How long is the espresso machine guaranteed?", "document": "product-warranty.txt", "phrase": "two years"},
+    {"query": "Where can I find the serial number?", "document": "product-warranty.txt", "phrase": "underneath the drip tray"},
+    {"query": "Does limescale damage void the coverage?", "document": "product-warranty.txt", "phrase": "limescale"}
+  ]
+}
