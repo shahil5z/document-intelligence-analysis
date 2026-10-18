@@ -19,7 +19,7 @@ from sqlalchemy.engine import URL
 from app.core.rate_limit import parse_rate
 
 MIN_JWT_SECRET_LENGTH = 32
-_PLACEHOLDER_PREFIXES = ("replace-with", "change-me", "changeme")
+_PLACEHOLDER_PREFIXES = ("replace-with", "change-me", "changeme", "<")
 
 
 class Environment(StrEnum):

@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 # A bare file literally named "env" at the repository root (used for keeping keys locally)
 /env
 
@@ -34,3 +35,15 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Local production-like E2E artefacts (local CA certificate, logs)
+/.e2e/
+
+# Frontend
+node_modules/
+/frontend/.next/
+/frontend/out/
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/next-env.d.ts
+*.tsbuildinfo
