@@ -1,8 +1,18 @@
+import os
+import uuid
+
 import pytest
-from prometheus_client import REGISTRY
 
 from app.core.config import SettingsError, load_settings
-from app.core.rate_limit import MemoryRateLimiter, Rate, RedisRateLimiter, parse_rate
+from app.core.rate_limit import (
+    MemoryRateLimiter,
+    Rate,
+    RateLimiterUnavailableError,
+    RedisRateLimiter,
+    parse_rate,
+)
+
+TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "")
 
 
 @pytest.mark.parametrize(
@@ -52,9 +62,22 @@ def test_memory_limiter_stays_bounded() -> None:
     assert later.hit("s", "0", Rate(1, 60)).allowed
 
 
-def test_redis_limiter_fails_open_when_redis_is_unreachable() -> None:
-    before = REGISTRY.get_sample_value("dip_rate_limiter_errors_total") or 0.0
+def test_redis_limiter_raises_when_redis_is_unreachable() -> None:
+    """The limiter reports the outage; the per-scope policy lives in the dependency."""
     limiter = RedisRateLimiter("redis://127.0.0.1:1/0", timeout_seconds=0.2)
-    decision = limiter.hit("login", "1.2.3.4", Rate(1, 60))
-    assert decision.allowed
-    assert (REGISTRY.get_sample_value("dip_rate_limiter_errors_total") or 0.0) == before + 1
+    with pytest.raises(RateLimiterUnavailableError) as excinfo:
+        limiter.hit("login", "1.2.3.4", Rate(1, 60))
+    assert "127.0.0.1" not in str(excinfo.value)
+
+
+@pytest.mark.skipif(not TEST_REDIS_URL, reason="needs an authenticated Redis: set TEST_REDIS_URL")
+def test_redis_limiter_counts_in_real_redis_and_shares_state_between_instances() -> None:
+    scope = f"test-{uuid.uuid4().hex}"
+    first = RedisRateLimiter(TEST_REDIS_URL)
+    second = RedisRateLimiter(TEST_REDIS_URL)  # e.g. another API process
+    rate = Rate(3, 60)
+    decisions = [first.hit(scope, "client", rate) for _ in range(2)]
+    decisions += [second.hit(scope, "client", rate) for _ in range(2)]
+    assert [d.allowed for d in decisions] == [True, True, True, False]
+    assert decisions[-1].retry_after_seconds >= 1
+    assert second.hit(scope, "another-client", rate).allowed

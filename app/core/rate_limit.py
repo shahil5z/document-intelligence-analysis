@@ -4,9 +4,12 @@ Limits are written as ``"<count>/<period>"`` (period: second, minute, hour, day)
 example ``"10/minute"``. Identifiers (IP addresses, user ids, e-mail addresses) are
 hashed before they are used in a key, so no personal data is stored in Redis.
 
-The Redis backend *fails open*: if Redis cannot be reached the request is allowed and a
-warning plus a metric are emitted. Rate limiting protects capacity; it must not turn a
-Redis outage into a full API outage (readiness already reports Redis as down).
+Backend failures: ``RedisRateLimiter.hit`` raises ``RateLimiterUnavailableError`` when
+Redis cannot be reached. The *caller* (``app/api/dependencies/rate_limit.py``) decides
+per scope: credential endpoints (register, login) fail **closed** with 503, because an
+unlimited login endpoint during a Redis outage is an open door for password guessing;
+every other scope fails **open** (request allowed, warning log + metric), because those
+endpoints are already authenticated and a Redis outage must not take the whole API down.
 """
 
 import hashlib
@@ -19,8 +22,6 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import redis
-
-from app.core.metrics import RATE_LIMITER_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,10 @@ def _window(rate: Rate, now: float) -> tuple[int, int]:
     index = int(now // rate.window_seconds)
     remaining = max(1, math.ceil((index + 1) * rate.window_seconds - now))
     return index, remaining
+
+
+class RateLimiterUnavailableError(Exception):
+    """The shared counter store could not be reached (message never contains the URL)."""
 
 
 class RateLimiter(Protocol):
@@ -118,13 +123,7 @@ class RedisRateLimiter:
             pipe.expire(key, rate.window_seconds + 1)
             count = int(pipe.execute()[0])
         except redis.RedisError as exc:
-            RATE_LIMITER_ERRORS.inc()
-            logger.warning(
-                "rate_limit.backend_unavailable", extra={"error_type": type(exc).__name__}
-            )
-            return RateLimitDecision(
-                allowed=True, limit=rate.limit, remaining=rate.limit, retry_after_seconds=0
-            )
+            raise RateLimiterUnavailableError(type(exc).__name__) from exc
         allowed = count <= rate.limit
         return RateLimitDecision(
             allowed=allowed,

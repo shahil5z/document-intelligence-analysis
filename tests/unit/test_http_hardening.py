@@ -6,7 +6,7 @@ the routes, middleware, dependencies and exception handlers are the real ones.
 """
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, MutableMapping
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,6 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
+from pydantic import SecretStr
 
 from app.api.dependencies.auth import get_current_active_user
 from app.api.dependencies.services import get_auth_service, get_search_service
@@ -196,6 +197,60 @@ def test_rate_limits_disabled_means_no_429(fake_auth: _FakeAuth) -> None:
     assert statuses == {409}
 
 
+def _redis_down(fake_auth: _FakeAuth) -> FastAPI:
+    """Redis backend pointed at a closed port: every limiter call fails."""
+    return _app(
+        fake_auth,
+        rate_limit_enabled=True,
+        rate_limit_backend="redis",
+        redis_url=SecretStr("redis://127.0.0.1:1/0"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "kwargs", "scope"),
+    [
+        ("/auth/login", {"json": {"email": "a@example.com", "password": "x" * 12}}, "login"),
+        ("/auth/token", {"data": {"username": "a@example.com", "password": "x" * 12}}, "login"),
+        (
+            "/auth/register",
+            {"json": {"email": "a@example.com", "password": "a-long-enough-password"}},
+            "register",
+        ),
+    ],
+)
+def test_credential_endpoints_fail_closed_when_rate_limiter_is_down(
+    fake_auth: _FakeAuth, path: str, kwargs: dict[str, Any], scope: str
+) -> None:
+    before = _sample("dip_rate_limiter_errors_total", {"scope": scope, "decision": "fail_closed"})
+    with _client(_redis_down(fake_auth)) as client:
+        response = client.post(path, **kwargs)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "service_unavailable"
+    assert int(response.headers["retry-after"]) >= 1
+    assert "127.0.0.1" not in response.text
+    # The credentials were never checked.
+    assert fake_auth.logins == []
+    after = _sample("dip_rate_limiter_errors_total", {"scope": scope, "decision": "fail_closed"})
+    assert after == before + 1
+
+
+def test_authenticated_endpoints_fail_open_when_rate_limiter_is_down(
+    fake_auth: _FakeAuth, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app = _redis_down(fake_auth)
+    app.dependency_overrides[get_current_active_user] = lambda: SimpleNamespace(id=uuid.uuid4())
+    app.dependency_overrides[get_search_service] = _FakeSearch
+    before = _sample("dip_rate_limiter_errors_total", {"scope": "search", "decision": "fail_open"})
+    with _client(app) as client:
+        statuses = [client.post("/search", json={"query": "q"}).status_code for _ in range(2)]
+    assert statuses == [200, 200]
+    after = _sample("dip_rate_limiter_errors_total", {"scope": "search", "decision": "fail_open"})
+    assert after == before + 2
+    logged = capsys.readouterr()
+    assert '"decision": "fail_open"' in logged.out + logged.err
+
+
 # --- headers, docs, CORS -------------------------------------------------------------
 
 
@@ -283,3 +338,39 @@ def test_internal_errors_do_not_leak_details() -> None:
         "message": "Internal server error",
         "request_id": response.headers["x-request-id"],
     }
+
+
+def test_declared_oversized_upload_is_rejected_without_reading_the_body() -> None:
+    """Content-Length above the limit -> 413 before a single body chunk is received."""
+    import asyncio  # noqa: PLC0415
+
+    from app.core.middleware import BodySizeLimitMiddleware  # noqa: PLC0415
+
+    app_called = False
+    receive_calls = 0
+    sent: list[dict[str, Any]] = []
+
+    async def inner(scope: Any, receive: Any, send: Any) -> None:
+        nonlocal app_called
+        app_called = True
+
+    async def receive() -> dict[str, Any]:
+        nonlocal receive_calls
+        receive_calls += 1
+        return {"type": "http.request", "body": b"x" * 1024, "more_body": True}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(dict(message))
+
+    middleware = BodySizeLimitMiddleware(inner, default_limit=1024, upload_limit=4096)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/documents",
+        "headers": [(b"content-length", b"10485760000")],
+    }
+    asyncio.run(middleware(scope, receive, send))
+    assert not app_called
+    assert receive_calls == 0
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 413

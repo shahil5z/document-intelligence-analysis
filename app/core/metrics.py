@@ -43,7 +43,9 @@ RATE_LIMITED = Counter(
 )
 RATE_LIMITER_ERRORS = Counter(
     "dip_rate_limiter_errors_total",
-    "Rate-limiter backend failures (requests were allowed: fail-open).",
+    "Rate-limiter backend failures by scope and decision (fail_open = allowed, "
+    "fail_closed = rejected with 503).",
+    ("scope", "decision"),
 )
 UPLOADS = Counter(
     "dip_document_uploads_total", "Upload attempts that reached the service.", ("outcome",)
