@@ -1,0 +1,351 @@
+# Manual test checklist (Windows, PowerShell 7)
+
+A sequential, copy-paste walkthrough of the whole system on a Windows PC with Docker
+Desktop. Every step lists the command and the expected result. Run the steps **in
+order in one PowerShell 7 window** (`pwsh`), from the repository root; later steps use
+variables (`$base`, `$h`, `$doc`, ...) set by earlier ones.
+
+Why PowerShell 7: `Invoke-RestMethod -SkipHttpErrorCheck -StatusCodeVariable` (used to
+show 4xx/5xx status codes without exceptions) does not exist in Windows PowerShell 5.1.
+Uploads use `curl.exe` (shipped with Windows 10/11) because it lets us set the part's
+content type, which the API validates.
+
+Default rate limits apply (`RATE_LIMIT_REGISTER=5/minute` per IP,
+`RATE_LIMIT_LOGIN_PER_EMAIL=5/minute`). If you repeat steps quickly and get `429`, wait
+a minute.
+
+Status of this checklist: the commands were written for Windows and **have not been
+executed on Windows** by the author of this file; the equivalent flow ran on Linux via
+`scripts/smoke_test.py` (see [FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md)).
+
+---
+
+### 1. Prerequisites
+
+```powershell
+docker version            # Docker Desktop running, WSL 2 backend
+docker compose version    # v2.x
+py -3.12 --version        # Python 3.12 (only for the helper scripts; stdlib only)
+$PSVersionTable.PSVersion # 7.x
+```
+
+Expected: all four print versions without errors.
+
+### 2. Configure `.env`
+
+New checkout (no `.env` yet):
+
+```powershell
+py -3.12 scripts\generate_env.py                          # random JWT/Postgres/Redis secrets
+py -3.12 scripts\generate_env.py --force --openai-key-file env   # optional: import key from a file named env
+```
+
+Existing `.env` from an earlier stage (adds only the missing keys, never changes values):
+
+```powershell
+py -3.12 scripts\generate_env.py --merge --dry-run   # lists missing key names only
+py -3.12 scripts\generate_env.py --merge             # appends them; old file kept as .env.bak
+```
+
+Expected: only key *names* are printed (e.g. `added RATE_LIMIT_BACKEND`), never values.
+A second `--merge` prints `... nothing to do`. `.env` and `.env.bak` are git-ignored
+(`git status` shows neither).
+
+### 3. Start Docker
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+Expected: `postgres`, `redis`, `api`, `worker` are `Up ... (healthy)`; `migrate` is
+`Exited (0)`. The first build downloads ~1.5 GB (CPU torch).
+
+### 4. Migrations
+
+```powershell
+docker compose logs migrate
+docker compose exec api alembic current
+```
+
+Expected: the log shows `Running upgrade  -> 0001` and `0001 -> 0002`;
+`alembic current` prints `0002 (head)`.
+
+### 5. API is up
+
+```powershell
+$base = "http://localhost:8000"
+Invoke-RestMethod "$base/health/live"
+Start-Process "$base/docs"     # Swagger UI in the browser
+```
+
+Expected: `status : ok`; Swagger UI opens.
+
+### 6. Register
+
+```powershell
+$email = "alice-$(Get-Random)@example.com"
+$password = "alice-" + [guid]::NewGuid().ToString("N")
+$body = @{ email = $email; password = $password } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$base/auth/register" -ContentType "application/json" -Body $body
+```
+
+Expected: an object with `id`, `email`, `role : user`, `is_active : True`.
+
+### 7. Login
+
+```powershell
+$login = Invoke-RestMethod -Method Post "$base/auth/login" -ContentType "application/json" -Body $body
+$h = @{ Authorization = "Bearer $($login.access_token)" }
+Invoke-RestMethod "$base/auth/me" -Headers $h
+```
+
+Expected: `token_type : bearer`, `expires_in : 1800`; `/auth/me` returns your email.
+
+### 8. Upload a PDF
+
+```powershell
+py -3.12 -c "from scripts.smoke_test import build_pdf; open('sample.pdf','wb').write(build_pdf('Northwind refund policy.','Customers may return unused items within 30 days of delivery for a full refund.','Refunds are issued to the original payment method within 7 business days.'))"
+$up = curl.exe -s -X POST "$base/documents" -H "Authorization: Bearer $($login.access_token)" -F "file=@sample.pdf;type=application/pdf" | ConvertFrom-Json
+$up
+$doc = $up.id
+```
+
+Expected: `status : queued`, `job_status : queued`, an `id`. (Uploading the same file
+again returns `409 conflict`.)
+
+### 9. Status
+
+```powershell
+Invoke-RestMethod "$base/documents/$doc/status" -Headers $h | ConvertTo-Json -Depth 5
+```
+
+Expected: `status` is `queued` or `processing`; `job.stage` shows the current step
+(`integrity_check`, `extract`, `normalize`, `chunk`, `embed`, `index`).
+
+### 10. Wait for completion
+
+```powershell
+do { Start-Sleep 2; $s = Invoke-RestMethod "$base/documents/$doc/status" -Headers $h; $s.status } until ($s.status -in 'completed','failed')
+$s | ConvertTo-Json -Depth 5
+```
+
+Expected: `completed`, `job.status : completed`, `job.stage : index`, `chunk_count : 1`.
+The first document can take a minute while the worker downloads the embedding model
+(~130 MB). If it ends `failed` with "Processing failed after several attempts", the
+worker could not reach huggingface.co: see README "Offline model cache".
+
+### 11. Semantic search
+
+```powershell
+$q = @{ query = "How long do I have to send something back?"; mode = "semantic"; top_k = 3 } | ConvertTo-Json
+(Invoke-RestMethod -Method Post "$base/search" -Headers $h -ContentType "application/json" -Body $q).results | Select-Object filename, page_start, score
+```
+
+Expected: `sample.pdf`, `page_start 1`, a cosine score (roughly 0.5-0.8).
+
+### 12. Keyword search
+
+```powershell
+$q = @{ query = "refund payment method"; mode = "keyword" } | ConvertTo-Json
+(Invoke-RestMethod -Method Post "$base/search" -Headers $h -ContentType "application/json" -Body $q).results | Select-Object filename, score
+```
+
+Expected: `sample.pdf` with a `ts_rank` score.
+
+### 13. Hybrid search
+
+```powershell
+$q = @{ query = "refund window in days"; mode = "hybrid" } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$base/search" -Headers $h -ContentType "application/json" -Body $q | ConvertTo-Json -Depth 5
+```
+
+Expected: `mode : hybrid`, top result `sample.pdf` (score is an RRF value such as 0.03).
+
+### 14. Ask
+
+```powershell
+$a = @{ question = "How many days do customers have to return items?" } | ConvertTo-Json
+$ans = Invoke-RestMethod -Method Post "$base/ask" -Headers $h -ContentType "application/json" -Body $a -SkipHttpErrorCheck -StatusCodeVariable sc
+$sc; $ans | ConvertTo-Json -Depth 6
+```
+
+Expected **without** a real `OPENAI_API_KEY` (placeholder): `503` with
+`"Question answering is not configured; /search still works"`.
+With a real key (see "Real OpenAI test" below): `200`, an answer mentioning 30 days with
+`[S1]`, `insufficient_evidence : false`, `model : gpt-4o-mini`.
+
+### 15. Verify citations (only with a real or stub LLM)
+
+```powershell
+[regex]::Matches($ans.answer, '\[(S\d+)\]') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+$ans.citations | Select-Object source_id, document_id, filename, page_start
+$ans.warnings
+```
+
+Expected: every label in the answer appears as a `source_id` in `citations`; each citation's
+`document_id` equals `$doc`; `warnings` is empty or `invalid_citations_removed` (an
+invented label was stripped).
+
+### 16. Unrelated question
+
+```powershell
+$a = @{ question = "What is the boiling point of mercury?" } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$base/ask" -Headers $h -ContentType "application/json" -Body $a | ConvertTo-Json
+```
+
+Expected: `200`, `insufficient_evidence : True`, `model : null` (the LLM was not called;
+this works without a key), `citations : []`.
+
+### 17. Reprocess
+
+```powershell
+Invoke-RestMethod -Method Post "$base/documents/$doc/reprocess" -Headers $h -SkipHttpErrorCheck -StatusCodeVariable sc; $sc
+Invoke-RestMethod -Method Post "$base/documents/$doc/reprocess" -Headers $h -SkipHttpErrorCheck -StatusCodeVariable sc; $sc
+do { Start-Sleep 2; $s = Invoke-RestMethod "$base/documents/$doc/status" -Headers $h } until ($s.status -in 'completed','failed'); $s.status
+```
+
+Expected: `202` then `409` (already queued/processing; `202` only if the worker
+finished in between), then `completed` with `job.attempts : 1` for the new job.
+
+### 18. Second user
+
+```powershell
+$email2 = "bob-$(Get-Random)@example.com"
+$body2 = @{ email = $email2; password = $password } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$base/auth/register" -ContentType "application/json" -Body $body2 | Out-Null
+$h2 = @{ Authorization = "Bearer $((Invoke-RestMethod -Method Post "$base/auth/login" -ContentType 'application/json' -Body $body2).access_token)" }
+```
+
+Expected: no output, no error.
+
+### 19. Isolation
+
+```powershell
+foreach ($r in @(
+  @{ m = 'Get';    u = "$base/documents/$doc" },
+  @{ m = 'Get';    u = "$base/documents/$doc/status" },
+  @{ m = 'Post';   u = "$base/documents/$doc/reprocess" },
+  @{ m = 'Delete'; u = "$base/documents/$doc" })) {
+  Invoke-RestMethod -Method $r.m $r.u -Headers $h2 -SkipHttpErrorCheck -StatusCodeVariable sc | Out-Null; "$($r.m) $($r.u) -> $sc"
+}
+(Invoke-RestMethod "$base/documents" -Headers $h2).total
+$q = @{ query = "refund"; mode = "hybrid" } | ConvertTo-Json
+(Invoke-RestMethod -Method Post "$base/search" -Headers $h2 -ContentType "application/json" -Body $q).results.Count
+$q = @{ query = "refund"; document_id = $doc } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$base/search" -Headers $h2 -ContentType "application/json" -Body $q -SkipHttpErrorCheck -StatusCodeVariable sc | Out-Null; $sc
+```
+
+Expected: four lines ending `-> 404`; total `0`; `0` results; `404` for the foreign
+`document_id`. Alice's document is still there afterwards
+(`Invoke-RestMethod "$base/documents/$doc" -Headers $h` works).
+
+### 20. Invalid file
+
+```powershell
+Set-Content -Path evil.exe -Value "MZ not really a program"
+curl.exe -s -o NUL -w "%{http_code}`n" -X POST "$base/documents" -H "Authorization: Bearer $($login.access_token)" -F "file=@evil.exe;type=application/octet-stream"
+```
+
+Expected: `415`.
+
+### 21. Oversized upload
+
+```powershell
+[IO.File]::WriteAllBytes("$PWD\big.txt", [byte[]]::new(11MB))
+curl.exe -s -w "`n%{http_code}`n" -X POST "$base/documents" -H "Authorization: Bearer $($login.access_token)" -F "file=@big.txt;type=text/plain"
+Remove-Item big.txt
+```
+
+Expected: `413` with `"code":"payload_too_large"`. The API rejects it from the
+`Content-Length` header before reading the body (curl may report that the server
+closed the connection early; the status code is still 413).
+
+### 22. Rate limiting
+
+```powershell
+$victim = @{ email = "victim-$(Get-Random)@example.com"; password = "wrong-password-123" } | ConvertTo-Json
+1..6 | ForEach-Object { Invoke-RestMethod -Method Post "$base/auth/login" -ContentType "application/json" -Body $victim -SkipHttpErrorCheck -StatusCodeVariable sc | Out-Null; $sc }
+```
+
+Expected: `401` five times, then `429` (`RATE_LIMIT_LOGIN_PER_EMAIL=5/minute`); the 429
+response has a `Retry-After` header. If Redis is stopped (`docker compose stop redis`),
+login and register answer `503` (fail closed) while search keeps working (fail open);
+start it again with `docker compose start redis`.
+
+### 23. Health
+
+```powershell
+Invoke-RestMethod "$base/health"; Invoke-RestMethod "$base/health/live"
+```
+
+Expected: `status : ok` twice.
+
+### 24. Readiness
+
+```powershell
+Invoke-RestMethod "$base/health/ready" | ConvertTo-Json -Depth 4
+docker compose exec redis sh -c "env -u REDISCLI_AUTH redis-cli ping"
+```
+
+Expected: `status : ready` with `database`, `pgvector` and `redis` all `ok`; the
+unauthenticated `PING` prints `NOAUTH Authentication required.`
+
+### 25. Metrics
+
+```powershell
+(Invoke-WebRequest "$base/metrics").Content -split "`n" | Select-String 'dip_http_requests_total\{' | Select-Object -First 8
+(Invoke-WebRequest "$base/metrics").Content.Contains($doc)
+```
+
+Expected: lines such as
+`dip_http_requests_total{method="GET",route="/documents/{document_id}/status",status="200"}`;
+the second command prints `False` (no document ids in labels).
+
+### 26. Inspect logs for secrets
+
+```powershell
+$envMap = @{}
+Get-Content .env | Where-Object { $_ -match '^[A-Z0-9_]+=' } | ForEach-Object { $k, $v = $_ -split '=', 2; $envMap[$k] = $v }
+$logs = (docker compose logs --no-color api worker 2>&1) | Out-String
+foreach ($k in 'JWT_SECRET_KEY', 'POSTGRES_PASSWORD', 'REDIS_PASSWORD', 'OPENAI_API_KEY') {
+  $v = $envMap[$k]; if ($v -and $v.Length -ge 8) { "{0}: {1} occurrence(s)" -f $k, ([regex]::Matches($logs, [regex]::Escape($v))).Count }
+}
+"user password: {0}" -f ([regex]::Matches($logs, [regex]::Escape($password))).Count
+"access token: {0}" -f ([regex]::Matches($logs, [regex]::Escape($login.access_token))).Count
+"document text: {0}" -f ([regex]::Matches($logs, 'original payment method')).Count
+```
+
+Expected: every count is `0`. Values are compared in memory and never printed.
+
+Clean up: `Remove-Item sample.pdf, evil.exe`; `docker compose down` (keeps data) or
+`docker compose down -v` (deletes all volumes, including documents and the model cache).
+
+---
+
+## Real OpenAI test (optional, costs money)
+
+Safe procedure; the key never appears on screen or in git:
+
+1. Put the key into `.env` without echoing it: keep it in a file named `env` (one line
+   `OPENAI_API_KEY=sk-...`, git-ignored) and, if `.env` still has the placeholder,
+   edit `.env` in an editor and paste it (do not `echo` it in the shell, PowerShell
+   history would keep it). `generate_env.py --merge --openai-key-file env` only adds the
+   key when `.env` has no `OPENAI_API_KEY` line at all; it never replaces an existing value.
+2. Optional settings in `.env`: `LLM_MODEL` (default `gpt-4o-mini`), `LLM_BASE_URL`
+   (default `https://api.openai.com/v1`), `LLM_TIMEOUT_SECONDS` (default 30),
+   `LLM_MAX_OUTPUT_TOKENS` (700), `LLM_TEMPERATURE` (0). The client sends `max_tokens`
+   and `temperature`; models that reject those parameters (some reasoning models) will
+   answer `503` - use a chat model such as `gpt-4o-mini`.
+3. Recreate the API so it reads the new value: `docker compose up -d api`.
+4. Repeat steps 14-16. Expected: 200 with a cited answer for the policy question,
+   `insufficient_evidence : True` and no LLM call for the unrelated question.
+5. Or run the whole scenario: `py -3.12 scripts\smoke_test.py --real-llm` (two `/ask`
+   calls of a few hundred tokens each).
+6. Run step 26 again: `OPENAI_API_KEY: 0 occurrence(s)`.
+7. Failure modes are controlled: a wrong key gives `503` with "The answer service is
+   temporarily unavailable; /search still works" and a log line `llm.http_error` with
+   `status_code: 401` (no key, prompt or response body is logged).
+
+No paid request was made while preparing this project; the real-OpenAI path is
+**NOT VERIFIED** (see FINAL_PROJECT_REPORT.md).
