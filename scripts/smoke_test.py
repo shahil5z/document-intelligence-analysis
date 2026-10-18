@@ -1,6 +1,7 @@
 """End-to-end smoke test against a running stack (API + worker + Postgres + Redis).
 
 Usage:  python scripts/smoke_test.py [--base-url http://localhost:8000]
+        python scripts/smoke_test.py --real-llm      # requires a real, paid LLM answer
 
 Uses only the standard library. Registers a throwaway user, uploads a generated PDF
 and a TXT file, waits for the real worker to extract, chunk, embed and index them, runs
@@ -8,15 +9,28 @@ and a TXT file, waits for the real worker to extract, chunk, embed and index the
 then deletes and checks the document is no longer searchable.
 
 /ask needs a configured LLM (OPENAI_API_KEY). By default both an answer (200) and
-"LLM unavailable" (503) are accepted; use --ask-expect answer|unavailable to be strict.
+"LLM unavailable" (503) are accepted, so the default run never needs a real key; use
+--ask-expect answer|unavailable to be strict. ``--real-llm`` is the explicit opt-in for a
+run against the real provider configured in the API's .env: it implies
+``--ask-expect answer`` and additionally requires inline [S<n>] citations that point at
+the uploaded document. It sends two short questions (a few hundred tokens) to the LLM.
+
+Also checked: 401 without a token, an immediate second reprocess (409, or 202 if the
+worker already finished), 413 for an
+upload whose Content-Length exceeds MAX_UPLOAD_SIZE_BYTES (``--max-upload-bytes``),
+cross-user 404s (get/status/delete/reprocess/search/ask), /metrics, and, with
+``--check-rate-limit``, a 429 after repeated failed logins for one e-mail address.
 """
 
 import argparse
+import http.client
 import json
+import re
 import secrets
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Any
@@ -109,6 +123,27 @@ class Client:
         )
         return status, payload
 
+    def declared_oversized_upload(self, declared_bytes: int) -> tuple[int, Any]:
+        """Send only the headers of an upload whose Content-Length is too large.
+
+        The API must answer 413 without waiting for (or reading) the body, so no
+        body is sent at all; a server that tried to read it would time out instead.
+        """
+        url = urllib.parse.urlsplit(self.base_url)
+        conn = http.client.HTTPConnection(url.hostname or "localhost", url.port, timeout=15)
+        try:
+            conn.putrequest("POST", url.path.rstrip("/") + "/documents")
+            conn.putheader("Content-Type", "multipart/form-data; boundary=x")
+            conn.putheader("Content-Length", str(declared_bytes))
+            if self.token:
+                conn.putheader("Authorization", f"Bearer {self.token}")
+            conn.endheaders()
+            resp = conn.getresponse()
+            raw = resp.read()
+            return resp.status, json.loads(raw) if raw else None
+        finally:
+            conn.close()
+
 
 def check(condition: bool, message: str) -> None:
     print(("PASS " if condition else "FAIL ") + message)
@@ -135,7 +170,21 @@ def main() -> None:  # noqa: PLR0915  (one linear end-to-end scenario)
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://localhost:8000")
     parser.add_argument("--ask-expect", choices=["any", "answer", "unavailable"], default="any")
+    parser.add_argument(
+        "--real-llm",
+        action="store_true",
+        help="require a real LLM answer with valid citations (makes paid API calls)",
+    )
+    parser.add_argument("--max-upload-bytes", type=int, default=10 * 1024 * 1024)
+    parser.add_argument(
+        "--check-rate-limit",
+        action="store_true",
+        help="expect 429 after repeated failed logins (RATE_LIMIT_LOGIN_PER_EMAIL)",
+    )
     args = parser.parse_args()
+    if args.real_llm:
+        args.ask_expect = "answer"
+        print("NOTE --real-llm: /ask will call the LLM configured in the API's environment")
     client = Client(args.base_url)
 
     status, headers, body = client.request("GET", "/health")
@@ -158,6 +207,8 @@ def main() -> None:  # noqa: PLR0915  (one linear end-to-end scenario)
     client.token = body["access_token"]
     status, _, body = client.request("GET", "/auth/me")
     check(status == 200 and body["email"] == email, f"GET /auth/me -> {status}")
+    status, _, _ = Client(args.base_url).request("GET", "/documents")
+    check(status == 401, f"GET /documents without token -> {status}")
 
     marker = uuid.uuid4().hex[:8]
     pdf = build_pdf(
@@ -217,6 +268,10 @@ def main() -> None:  # noqa: PLR0915  (one linear end-to-end scenario)
     if status == 200:
         cited = {c["document_id"] for c in body["citations"]}
         ok = (not body["insufficient_evidence"]) and cited <= set(documents) and bool(cited)
+        if args.real_llm:
+            labels = set(re.findall(r"\[(S\d+)\]", body["answer"]))
+            ok = ok and labels == {c["source_id"] for c in body["citations"]}
+            ok = ok and documents[0] in cited and "30" in body["answer"]
         check(
             ok and args.ask_expect != "unavailable",
             f"POST /ask -> 200 model={body['model']} citations={len(body['citations'])} "
@@ -237,6 +292,18 @@ def main() -> None:  # noqa: PLR0915  (one linear end-to-end scenario)
 
     status, body = client.upload("smoke.exe", b"MZ\x90\x00", "application/octet-stream")
     check(status == 415, f"POST /documents smoke.exe -> {status}")
+    status, body = client.declared_oversized_upload(args.max_upload_bytes + 1024 * 1024)
+    check(
+        status == 413 and body["error"]["code"] == "payload_too_large",
+        f"POST /documents with oversized Content-Length (no body sent) -> {status}",
+    )
+    # Within the multipart overhead allowance, so the request is accepted and the
+    # streamed file part itself trips the MAX_UPLOAD_SIZE_BYTES limit.
+    status, body = client.upload("big.txt", b"a" * (args.max_upload_bytes + 1024), "text/plain")
+    check(
+        status == 413 and body["error"]["code"] == "payload_too_large",
+        f"POST /documents file part above MAX_UPLOAD_SIZE_BYTES -> {status}",
+    )
 
     status, _, body = client.request("GET", "/documents?page=1&page_size=1")
     check(
@@ -274,9 +341,17 @@ def main() -> None:  # noqa: PLR0915  (one linear end-to-end scenario)
         "POST", "/search", json_body={"query": "refund", "document_id": documents[0]}
     )
     check(status == 404, f"other user POST /search document_id=<foreign> -> {status}")
+    status, _, body = intruder.request(
+        "POST", "/ask", json_body={"question": "refund days?", "document_id": documents[0]}
+    )
+    check(status == 404, f"other user POST /ask document_id=<foreign> -> {status}")
+    status, _, _ = intruder.request("POST", f"/documents/{documents[0]}/reprocess")
+    check(status == 404, f"other user POST reprocess -> {status}")
 
     status, _, body = client.request("POST", f"/documents/{documents[1]}/reprocess")
     check(status == 202 and body["status"] == "queued", f"POST reprocess -> {status}")
+    status, _, _ = client.request("POST", f"/documents/{documents[1]}/reprocess")
+    check(status in {409, 202}, f"POST reprocess again while queued/processing -> {status}")
     final = wait_for_terminal(client, documents[1])
     check(final["status"] == "completed", f"reprocessed document -> {final['status']}")
 
@@ -296,6 +371,29 @@ def main() -> None:  # noqa: PLR0915  (one linear end-to-end scenario)
     status, _, body = client.request("GET", "/audit-logs/me")
     actions = sorted({item["action"] for item in body["items"]})
     check(status == 200 and "document.deleted" in actions, f"GET /audit-logs/me -> {actions}")
+
+    metrics = urllib.request.urlopen(args.base_url.rstrip("/") + "/metrics", timeout=15)  # noqa: S310
+    text = metrics.read().decode()
+    check(
+        metrics.status == 200
+        and 'route="/documents/{document_id}"' in text
+        and documents[0] not in text
+        and email not in text,
+        "GET /metrics -> route templates only, no ids or e-mails",
+    )
+
+    if args.check_rate_limit:
+        victim = f"smoke-victim-{uuid.uuid4().hex[:8]}@example.com"
+        statuses = [
+            Client(args.base_url).request(
+                "POST", "/auth/login", json_body={"email": victim, "password": "wrong-password-1"}
+            )[0]
+            for _ in range(12)
+        ]
+        check(
+            statuses[0] == 401 and statuses[-1] == 429,
+            f"repeated failed logins -> {statuses}",
+        )
     print("SMOKE TEST PASSED")
 
 
