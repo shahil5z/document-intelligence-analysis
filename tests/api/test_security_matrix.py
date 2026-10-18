@@ -1,14 +1,17 @@
 """Cross-user isolation matrix and upload hardening against the real database."""
 
+import threading
+import time
 import uuid
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.db.models import Document
+from app.db.models import Document, DocumentProcessingJob
+from app.db.session import get_session_factory
 from app.storage.local import LocalStorage
 from tests.conftest import RecordingDispatcher, upload_and_index
 from tests.factories import pdf_file
@@ -166,3 +169,60 @@ def test_reprocess_twice_conflicts_instead_of_creating_two_jobs(
     second = client.post(f"/documents/{alice_document}/reprocess", headers=user_headers)
     assert first.status_code == 202
     assert second.status_code == 409
+
+
+def test_concurrent_reprocess_requests_create_exactly_one_job(
+    client: TestClient,
+    alice_document: uuid.UUID,
+    user_headers: dict[str, str],
+    dispatcher: RecordingDispatcher,
+    db_session: Session,
+) -> None:
+    """Two simultaneous requests: the row lock serialises them, the second sees 'queued'.
+
+    A third session holds the document row lock until both requests are blocked on it,
+    so the race is forced deterministically instead of hoping threads overlap.
+    """
+    jobs_before = len(
+        db_session.scalars(
+            select(DocumentProcessingJob).where(DocumentProcessingJob.document_id == alice_document)
+        ).all()
+    )
+    dispatched_before = len(dispatcher.calls)
+    results: list[int] = []
+    factory = get_session_factory()
+    with factory() as blocker:
+        blocker.scalar(select(Document).where(Document.id == alice_document).with_for_update())
+
+        def call() -> None:
+            response = client.post(f"/documents/{alice_document}/reprocess", headers=user_headers)
+            results.append(response.status_code)
+
+        threads = [threading.Thread(target=call) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            # Activity stats are snapshotted per transaction; refresh them each poll.
+            blocker.execute(text("SELECT pg_stat_clear_snapshot()"))
+            waiting = blocker.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE wait_event_type = 'Lock' AND datname = current_database()"
+                )
+            ).scalar_one()
+            if waiting >= 2:
+                break
+            time.sleep(0.05)
+        assert waiting >= 2, "both requests should be waiting for the row lock"
+        blocker.rollback()  # release the lock
+        for thread in threads:
+            thread.join(timeout=10)
+
+    assert sorted(results) == [202, 409]
+    db_session.expire_all()
+    jobs_after = db_session.scalars(
+        select(DocumentProcessingJob).where(DocumentProcessingJob.document_id == alice_document)
+    ).all()
+    assert len(jobs_after) == jobs_before + 1
+    assert len(dispatcher.calls) == dispatched_before + 1
