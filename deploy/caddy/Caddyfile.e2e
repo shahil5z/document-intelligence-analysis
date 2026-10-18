@@ -1,0 +1,16 @@
+# Local, production-like test only (docker-compose.prod.e2e.yml): the same API site as
+# the production Caddyfile plus two helper sites with the local CA:
+#   app.localhost      -> the Next.js frontend running on the host (next start)
+#   stub-llm.internal  -> the OpenAI-compatible stub, so /ask uses HTTPS as production
+#                          requires (LLM_BASE_URL must be https:// when APP_ENV=production).
+import /etc/caddy/Caddyfile
+
+app.localhost {
+	tls internal
+	reverse_proxy {$E2E_FRONTEND_UPSTREAM:host.docker.internal:3000}
+}
+
+stub-llm.internal {
+	tls internal
+	reverse_proxy stub-llm:8080
+}

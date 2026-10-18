@@ -1,0 +1,46 @@
+# Local, production-like end-to-end test only. Never use on a server.
+#   scripts/e2e_prod_local.sh   (starts this, the frontend and Playwright)
+# Same images and settings as docker-compose.prod.yml (APP_ENV=production, gunicorn,
+# Caddy with HTTPS) except: Caddy uses its local CA (CADDY_TLS=internal), serves the
+# frontend at https://app.localhost and the OpenAI-compatible stub at
+# https://stub-llm.internal, and the API trusts that local CA for the stub only.
+services:
+  stub-llm:
+    image: ${DIP_IMAGE:-document-intelligence-platform:prod}
+    command: ["python", "/app/scripts/stub_llm_server.py"]
+    volumes:
+      - ./scripts/stub_llm_server.py:/app/scripts/stub_llm_server.py:ro
+    networks: [web]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    environment:
+      LLM_BASE_URL: https://stub-llm.internal/v1
+      LLM_MODEL: stub-model
+      # The local Caddy root certificate, copied out by scripts/e2e_prod_local.sh.
+      SSL_CERT_FILE: /e2e-ca/caddy-root.crt
+    volumes:
+      - ./.e2e:/e2e-ca:ro
+
+  caddy:
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy/Caddyfile.e2e:/etc/caddy/Caddyfile.e2e:ro
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.e2e", "--adapter", "caddyfile"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      web:
+        aliases:
+          - stub-llm.internal
+    depends_on:
+      stub-llm:
+        condition: service_healthy

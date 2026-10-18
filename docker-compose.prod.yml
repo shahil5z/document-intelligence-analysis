@@ -1,0 +1,329 @@
+# Production stack for a single VM (sized for an OCI Ampere A1 VM: 2 OCPU / 12 GB, arm64;
+# also runs on amd64). Separate from the development docker-compose.yml.
+#
+#   cp .env.production.example .env.production   # then fill in every value
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#   (scripts/deploy.sh does this plus backup, migrations, health check and smoke test)
+#
+# Internet -> Caddy (80/443, automatic HTTPS) -> api (gunicorn + uvicorn workers).
+# PostgreSQL and Redis publish no ports and sit on an internal-only network; the API
+# port is not published either, so Caddy is the only way in. /metrics is blocked at
+# Caddy and stays scrapeable inside the compose network (api:8000, worker:9100).
+
+name: ${COMPOSE_PROJECT_NAME:-dip}
+
+x-app-environment: &app-environment
+  APP_NAME: ${APP_NAME:-Document Intelligence Platform}
+  APP_ENV: ${APP_ENV:-production}
+  DEBUG: "false"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ${POSTGRES_DB:-dip}
+  POSTGRES_USER: ${POSTGRES_USER:-dip}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.production}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_DB: ${REDIS_DB:-0}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env.production}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env.production}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+  UPLOAD_TOKEN_EXPIRE_SECONDS: ${UPLOAD_TOKEN_EXPIRE_SECONDS:-300}
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+  STORAGE_PATH: /data/storage
+  STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-}
+  STORAGE_S3_ENDPOINT_URL: ${STORAGE_S3_ENDPOINT_URL:-}
+  STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}
+  STORAGE_S3_ACCESS_KEY_ID: ${STORAGE_S3_ACCESS_KEY_ID:-}
+  STORAGE_S3_SECRET_ACCESS_KEY: ${STORAGE_S3_SECRET_ACCESS_KEY:-}
+  STORAGE_S3_PREFIX: ${STORAGE_S3_PREFIX:-}
+  MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-10485760}
+  ALLOWED_EXTENSIONS: ${ALLOWED_EXTENSIONS:-pdf,docx,txt}
+  ALLOWED_CONTENT_TYPES: ${ALLOWED_CONTENT_TYPES:-application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain}
+  # Only the frontend origin(s), e.g. https://your-app.vercel.app (https:// enforced).
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS must be set in .env.production}
+  # Only POST /ask uses it; without a key /ask answers 503 and everything else works.
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-sentence-transformers}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+  EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+  EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+  TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+  CHUNK_SIZE: ${CHUNK_SIZE:-400}
+  CHUNK_OVERLAP: ${CHUNK_OVERLAP:-60}
+  MAX_CHUNKS_PER_DOCUMENT: ${MAX_CHUNKS_PER_DOCUMENT:-1000}
+  TOP_K: ${TOP_K:-5}
+  MAX_TOP_K: ${MAX_TOP_K:-20}
+  CANDIDATE_K: ${CANDIDATE_K:-40}
+  MAX_QUERY_LENGTH: ${MAX_QUERY_LENGTH:-1000}
+  MIN_EVIDENCE_SIMILARITY: ${MIN_EVIDENCE_SIMILARITY:-0.48}
+  RERANKING_ENABLED: ${RERANKING_ENABLED:-false}
+  RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
+  RERANK_TOP_K: ${RERANK_TOP_K:-20}
+  LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+  LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+  LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-700}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0}
+  MAX_CONTEXT_TOKENS: ${MAX_CONTEXT_TOKENS:-3000}
+  HF_HOME: /data/models
+  HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+  API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+  MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-1048576}
+  UPLOAD_BODY_OVERHEAD_BYTES: ${UPLOAD_BODY_OVERHEAD_BYTES:-65536}
+  SECURITY_HEADERS_ENABLED: "true"
+  RATE_LIMIT_ENABLED: "true"
+  RATE_LIMIT_BACKEND: redis
+  # Public-demo defaults: registration/login per client IP, the rest per user. /ask is
+  # the only call that costs money (OpenAI), so it gets the tightest budget.
+  RATE_LIMIT_REGISTER: ${RATE_LIMIT_REGISTER:-10/hour}
+  RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-10/minute}
+  RATE_LIMIT_LOGIN_PER_EMAIL: ${RATE_LIMIT_LOGIN_PER_EMAIL:-5/minute}
+  RATE_LIMIT_UPLOAD: ${RATE_LIMIT_UPLOAD:-30/day}
+  RATE_LIMIT_SEARCH: ${RATE_LIMIT_SEARCH:-60/minute}
+  RATE_LIMIT_ASK: ${RATE_LIMIT_ASK:-20/hour}
+  RATE_LIMIT_REPROCESS: ${RATE_LIMIT_REPROCESS:-20/day}
+  METRICS_ENABLED: ${METRICS_ENABLED:-true}
+  CELERY_TASK_SOFT_TIME_LIMIT: ${CELERY_TASK_SOFT_TIME_LIMIT:-240}
+  CELERY_TASK_TIME_LIMIT: ${CELERY_TASK_TIME_LIMIT:-300}
+  STALE_JOB_TIMEOUT_SECONDS: ${STALE_JOB_TIMEOUT_SECONDS:-900}
+  STALE_JOB_CHECK_INTERVAL_SECONDS: ${STALE_JOB_CHECK_INTERVAL_SECONDS:-300}
+
+x-app-hardening: &app-hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  init: true
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+x-app-image: &app-image
+  build:
+    context: .
+  image: ${DIP_IMAGE:-document-intelligence-platform:prod}
+
+# Base images: multi-arch index digests (linux/amd64 + linux/arm64), checked 2026-10-18
+# with `docker buildx imagetools inspect <image>`.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=60
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dip}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:-dip}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [backend]
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    stop_grace_period: 30s
+    restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 2g}
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    # Password via a 0600 config file, not the command line (see docker-compose.yml).
+    command:
+      - sh
+      - -c
+      - >-
+        umask 077 &&
+        rm -f /tmp/redis-auth.conf &&
+        printf 'requirepass %s\n' "$$REDIS_PASSWORD" > /tmp/redis-auth.conf &&
+        chown redis:redis /tmp/redis-auth.conf &&
+        unset REDIS_PASSWORD &&
+        exec docker-entrypoint.sh redis-server /tmp/redis-auth.conf --appendonly yes
+        --maxmemory 400mb --maxmemory-policy noeviction
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env.production}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env.production}
+    volumes:
+      - redis_data:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 512m}
+
+  # One-off: `docker compose ... run --rm migrate` (scripts/deploy.sh). `up` runs it too.
+  migrate:
+    <<: [*app-image, *app-hardening]
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-environment
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: [*app-image, *app-hardening]
+    command: ["gunicorn", "-c", "python:app.gunicorn_conf", "app.main:app"]
+    environment:
+      <<: *app-environment
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+    tmpfs:
+      - /tmp/prometheus:mode=1777,size=16m
+    expose:
+      - "8000"
+    volumes:
+      - storage_data:/data/storage
+      - model_cache:/data/models
+    networks: [backend, web]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 3g}
+
+  worker:
+    <<: [*app-image, *app-hardening]
+    # No -B: the periodic stale-job reconciler is scheduled by the single `beat` service.
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=${WORKER_CONCURRENCY:-2}", "--max-tasks-per-child=200"]
+    environment:
+      <<: *app-environment
+      WORKER_METRICS_PORT: "9100"
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+    tmpfs:
+      - /tmp/prometheus:mode=1777,size=16m
+    expose:
+      - "9100"
+    volumes:
+      - storage_data:/data/storage
+      - model_cache:/data/models
+    networks: [backend, web]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app:celery_app inspect ping -d celery@$$HOSTNAME --timeout 5"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 3g}
+
+  # Exactly one scheduler. Do not scale this service: two beats would enqueue every
+  # periodic task twice (the reconciler is idempotent, but the rule keeps it simple).
+  beat:
+    <<: [*app-image, *app-hardening]
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "beat", "--loglevel=INFO", "--schedule", "/tmp/beat/celerybeat-schedule"]
+    environment: *app-environment
+    tmpfs:
+      - /tmp/beat:mode=1777,size=8m
+    networks: [backend]
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Beat rewrites its schedule file after sending the reconciler task (every
+    # STALE_JOB_CHECK_INTERVAL_SECONDS, 300 s by default); a stale file means it is stuck.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import glob,os,sys,time; f=glob.glob('/tmp/beat/celerybeat-schedule*'); sys.exit(0 if f and time.time()-max(map(os.path.getmtime,f)) < 900 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 384m}
+
+  caddy:
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN must be set in .env.production}
+      CADDY_TLS: ${CADDY_TLS:?CADDY_TLS must be set (ACME e-mail, or internal)}
+      CADDY_MAX_BODY_SIZE: ${CADDY_MAX_BODY_SIZE:-11MB}
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [web]
+    depends_on:
+      api:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null --no-check-certificate http://127.0.0.1:80/ 2>/dev/null; nc -z 127.0.0.1 443"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256m}
+
+networks:
+  # No route to the outside world: only the database and the queue live here.
+  backend:
+    internal: true
+  # Caddy <-> api, and outbound access for api/worker (OpenAI, Hugging Face, object storage).
+  web: {}
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
+  model_cache:
+  caddy_data:
+  caddy_config:

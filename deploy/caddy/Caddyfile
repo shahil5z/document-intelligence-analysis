@@ -1,0 +1,45 @@
+# Public entry point of the production API (docker-compose.prod.yml).
+#
+# API_DOMAIN  - the hostname clients use, e.g. api.example.com, or a free hostname that
+#               needs no DNS account: <dashed-ip>.sslip.io (203-0-113-7.sslip.io) or a
+#               DuckDNS name. It must resolve to the server for Let's Encrypt to issue.
+# CADDY_TLS   - "internal" for a local CA (local tests), or the e-mail address that
+#               Let's Encrypt / ZeroSSL should use for expiry notices (production).
+# Only ports 80 (ACME challenge + redirect to HTTPS) and 443 are published.
+{
+	admin off
+	servers {
+		# HTTP/1.1 + HTTP/2 over TCP only; HTTP/3 would need UDP 443 opened as well.
+		protocols h1 h2
+	}
+}
+
+{$API_DOMAIN} {
+	tls {$CADDY_TLS}
+
+	# Prometheus metrics stay reachable inside the compose network (api:8000/metrics)
+	# but are never served to the internet.
+	@internal path /metrics /metrics/*
+	respond @internal 404
+
+	# Reject oversized bodies at the edge, before they reach the API. The API enforces
+	# MAX_UPLOAD_SIZE_BYTES + UPLOAD_BODY_OVERHEAD_BYTES itself as well.
+	request_body {
+		max_size {$CADDY_MAX_BODY_SIZE:11MB}
+	}
+
+	header {
+		# The API sets the other security headers (and HSTS when APP_ENV=production).
+		-Server
+	}
+
+	reverse_proxy api:8000 {
+		# /ask may wait LLM_TIMEOUT_SECONDS for the model, uploads may be slow links.
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 120s
+		}
+		health_uri /health/live
+		health_interval 30s
+	}
+}
