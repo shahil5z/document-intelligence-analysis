@@ -30,6 +30,28 @@ logger = logging.getLogger(__name__)
 RETRIES_EXHAUSTED_MESSAGE = "Processing failed after several attempts"
 UNEXPECTED_ERROR_MESSAGE = "Processing failed due to an internal error"
 TIMEOUT_MESSAGE = "Processing took too long and was stopped"
+STALE_JOB_MESSAGE = "Processing stopped responding and was marked as failed; reprocess to retry"
+
+_NON_TERMINAL_DOCUMENT_STATUSES = frozenset(
+    {DocumentStatus.UPLOADED, DocumentStatus.QUEUED, DocumentStatus.PROCESSING}
+)
+
+
+def force_fail(job: DocumentProcessingJob, document: Document | None, message: str) -> bool:
+    """Move a non-terminal job (and its unfinished document) to ``failed``.
+
+    Every non-terminal job status may go to ``failed`` directly (see the state machine);
+    a document that already reached ``completed``/``failed`` is left alone. Returns
+    ``False`` when the job was already terminal. The caller commits.
+    """
+    if job.status in TERMINAL_JOB_STATUSES:
+        return False
+    transition_job(job, JobStatus.FAILED)
+    job.completed_at = datetime.now(UTC)
+    job.error_message = message
+    if document is not None and document.status in _NON_TERMINAL_DOCUMENT_STATUSES:
+        transition_document(document, DocumentStatus.FAILED)
+    return True
 
 
 class JobOutcome(StrEnum):
@@ -221,6 +243,24 @@ class DocumentProcessor:
         except OperationalError as exc:
             logger.warning("job.finish_not_persisted", extra={"job_id": str(job_id)})
             raise TransientProcessingError("database unavailable while finishing job") from exc
+
+    def mark_failed(self, job_id: uuid.UUID, message: str) -> bool:
+        """Terminal failure after the retry budget is spent (used by the Celery task).
+
+        Raises ``OperationalError`` if the database is still unreachable; the stale-job
+        reconciler (``app/workers/reconcile.py``) then fails the job later.
+        """
+        with session_scope(self._session_factory) as session:
+            loaded = self._load(session, job_id)
+            if loaded is None:
+                return False
+            job, document = loaded
+            changed = force_fail(job, document, message)
+            session.commit()
+        if changed:
+            JOBS.labels("failed").inc()
+            logger.error("job.failed_after_retries", extra={"job_id": str(job_id)})
+        return changed
 
     def _mark_retrying(self, job_id: uuid.UUID) -> None:
         try:

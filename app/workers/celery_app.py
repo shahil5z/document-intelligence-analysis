@@ -13,6 +13,8 @@ from app.storage.factory import check_storage_backend
 
 logger = logging.getLogger(__name__)
 
+RECONCILE_STALE_JOBS_TASK = "jobs.reconcile_stale"
+
 
 def create_celery_app() -> Celery:
     settings = get_settings()
@@ -45,6 +47,15 @@ def create_celery_app() -> Celery:
         redis_socket_timeout=5,
         worker_hijack_root_logger=False,
     )
+    if settings.stale_job_check_interval_seconds > 0:
+        # Executed by the embedded beat of the compose worker (`celery worker -B`).
+        app.conf.beat_schedule = {
+            "reconcile-stale-jobs": {
+                "task": RECONCILE_STALE_JOBS_TASK,
+                "schedule": float(settings.stale_job_check_interval_seconds),
+                "options": {"expires": float(settings.stale_job_check_interval_seconds)},
+            }
+        }
     return app
 
 

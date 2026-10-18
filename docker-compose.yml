@@ -68,6 +68,8 @@ x-app-environment: &app-environment
   METRICS_ENABLED: ${METRICS_ENABLED:-true}
   CELERY_TASK_SOFT_TIME_LIMIT: ${CELERY_TASK_SOFT_TIME_LIMIT:-240}
   CELERY_TASK_TIME_LIMIT: ${CELERY_TASK_TIME_LIMIT:-300}
+  STALE_JOB_TIMEOUT_SECONDS: ${STALE_JOB_TIMEOUT_SECONDS:-900}
+  STALE_JOB_CHECK_INTERVAL_SECONDS: ${STALE_JOB_CHECK_INTERVAL_SECONDS:-300}
 
 # Container hardening shared by the application services (api, worker, migrate).
 x-app-hardening: &app-hardening
@@ -154,7 +156,9 @@ services:
 
   worker:
     <<: [*app-image, *app-hardening]
-    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    # -B embeds the beat scheduler that runs the stale-job reconciler every
+    # STALE_JOB_CHECK_INTERVAL_SECONDS (idempotent, so several worker replicas are safe).
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "-B", "--schedule", "/tmp/celerybeat-schedule", "--loglevel=INFO", "--concurrency=2"]
     environment:
       <<: *app-environment
       # Worker metrics: prefork children write to this tmpfs, the main process serves them

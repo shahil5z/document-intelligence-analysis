@@ -176,6 +176,11 @@ class Settings(BaseSettings):
 
     celery_task_soft_time_limit: int = Field(default=240, ge=1)
     celery_task_time_limit: int = Field(default=300, ge=1)
+    # Stale-job reconciliation (app/workers/reconcile.py): a job still "processing" or
+    # "retrying" after this many seconds is failed. Must exceed CELERY_TASK_TIME_LIMIT.
+    stale_job_timeout_seconds: int = Field(default=900, ge=60)
+    # How often the worker's embedded beat runs the reconciler (0 = never schedule it).
+    stale_job_check_interval_seconds: int = Field(default=300, ge=0)
 
     @field_validator("allowed_extensions", mode="before")
     @classmethod
@@ -290,6 +295,8 @@ class Settings(BaseSettings):
             problems.append("LLM_BASE_URL must be an http(s) URL")
         if self.celery_task_soft_time_limit >= self.celery_task_time_limit:
             problems.append("CELERY_TASK_SOFT_TIME_LIMIT must be below CELERY_TASK_TIME_LIMIT")
+        if self.stale_job_timeout_seconds <= self.celery_task_time_limit:
+            problems.append("STALE_JOB_TIMEOUT_SECONDS must exceed CELERY_TASK_TIME_LIMIT")
         return problems
 
     def _production_problems(self) -> list[str]:

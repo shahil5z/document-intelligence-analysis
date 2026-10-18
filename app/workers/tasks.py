@@ -7,15 +7,17 @@ import uuid
 
 from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy.exc import OperationalError
 
 from app.ai.factory import create_embedding_provider
 from app.core.config import get_settings
 from app.core.request_context import RequestContext, bind_context, reset_context
 from app.db.session import get_session_factory
 from app.storage.factory import get_storage_service
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import RECONCILE_STALE_JOBS_TASK, celery_app
 from app.workers.pipeline import TransientProcessingError
-from app.workers.processing import DocumentProcessor
+from app.workers.processing import RETRIES_EXHAUSTED_MESSAGE, DocumentProcessor, JobOutcome
+from app.workers.reconcile import reconcile_stale_jobs
 from app.workers.steps import build_indexing_pipeline
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,19 @@ EXTRA_REDELIVERY_ATTEMPTS = 2
 
 def max_claim_attempts(max_retries: int) -> int:
     return max_retries + 1 + EXTRA_REDELIVERY_ATTEMPTS
+
+
+def fail_after_retries(processor: DocumentProcessor, job_id: uuid.UUID) -> JobOutcome:
+    """Terminal failure once the retry budget is spent (best effort).
+
+    If even this write fails (database still down), the job is left to the stale-job
+    reconciler, which fails it after STALE_JOB_TIMEOUT_SECONDS.
+    """
+    try:
+        processor.mark_failed(job_id, RETRIES_EXHAUSTED_MESSAGE)
+    except OperationalError:
+        logger.error("job.terminal_state_not_persisted", extra={"job_id": str(job_id)})
+    return JobOutcome.FAILED
 
 
 @celery_app.task(
@@ -62,14 +77,25 @@ def process_document(
             timeout_errors=(SoftTimeLimitExceeded,),
         )
         retries = int(self.request.retries or 0)
+        is_final_attempt = retries >= (self.max_retries or 0)
         try:
-            outcome = processor.run(
-                job_id=uuid.UUID(job_id), is_final_attempt=retries >= (self.max_retries or 0)
-            )
+            outcome = processor.run(job_id=uuid.UUID(job_id), is_final_attempt=is_final_attempt)
         except TransientProcessingError as exc:
+            if is_final_attempt:
+                # No retry left (e.g. the final state could not be written): fail the job
+                # now instead of leaving it "processing" forever.
+                return fail_after_retries(processor, uuid.UUID(job_id)).value
             countdown = get_settings().celery_retry_backoff_seconds * (2**retries)
             logger.warning("task.retrying", extra={"retry_in_seconds": countdown})
             raise self.retry(exc=exc, countdown=countdown) from exc
         return outcome.value
     finally:
         reset_context(token)
+
+
+@celery_app.task(name=RECONCILE_STALE_JOBS_TASK, ignore_result=True)
+def reconcile_stale_jobs_task() -> int:
+    """Periodic (beat) task: fail jobs stuck in processing/retrying (app/workers/reconcile.py)."""
+    return reconcile_stale_jobs(
+        get_session_factory(), timeout_seconds=get_settings().stale_job_timeout_seconds
+    )

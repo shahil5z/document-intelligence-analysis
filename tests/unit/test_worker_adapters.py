@@ -9,14 +9,16 @@ from typing import Any, ClassVar
 
 import pytest
 from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy.exc import OperationalError
 
 from app.core.config import get_settings
 from app.core.request_context import get_request_id
 from app.services.task_dispatcher import TaskDispatchError
 from app.workers import tasks
+from app.workers.celery_app import RECONCILE_STALE_JOBS_TASK, celery_app, create_celery_app
 from app.workers.dispatcher import CeleryDocumentTaskDispatcher
 from app.workers.pipeline import TransientProcessingError
-from app.workers.processing import JobOutcome
+from app.workers.processing import RETRIES_EXHAUSTED_MESSAGE, JobOutcome
 
 
 class _Retry(Exception):  # noqa: N818  (mirrors celery.exceptions.Retry)
@@ -26,12 +28,20 @@ class _Retry(Exception):  # noqa: N818  (mirrors celery.exceptions.Retry)
 class _FakeProcessor:
     instances: ClassVar[list["_FakeProcessor"]] = []
     behaviour: ClassVar[str] = "complete"
+    mark_failed_raises: ClassVar[bool] = False
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
         self.runs: list[dict[str, Any]] = []
         self.request_ids: list[str | None] = []
+        self.failed: list[tuple[uuid.UUID, str]] = []
         _FakeProcessor.instances.append(self)
+
+    def mark_failed(self, job_id: uuid.UUID, message: str) -> bool:
+        if _FakeProcessor.mark_failed_raises:
+            raise OperationalError("UPDATE", {}, Exception("database down"))
+        self.failed.append((job_id, message))
+        return True
 
     def run(self, *, job_id: uuid.UUID, is_final_attempt: bool) -> JobOutcome:
         self.runs.append({"job_id": job_id, "is_final_attempt": is_final_attempt})
@@ -45,6 +55,7 @@ class _FakeProcessor:
 def fake_processor(monkeypatch: pytest.MonkeyPatch) -> type[_FakeProcessor]:
     _FakeProcessor.instances = []
     _FakeProcessor.behaviour = "complete"
+    _FakeProcessor.mark_failed_raises = False
     monkeypatch.setattr(tasks, "DocumentProcessor", _FakeProcessor)
     monkeypatch.setattr(tasks, "create_embedding_provider", lambda _settings: object())
     monkeypatch.setattr(tasks, "build_indexing_pipeline", lambda **_kwargs: "pipeline")
@@ -86,6 +97,43 @@ def test_transient_failure_schedules_retry_with_exponential_backoff(
         tasks.process_document(document_id=str(uuid.uuid4()), job_id=str(uuid.uuid4()))
     assert isinstance(seen["exc"], TransientProcessingError)
     assert seen["countdown"] == get_settings().celery_retry_backoff_seconds  # 2**0
+
+
+@pytest.mark.parametrize("db_still_down", [False, True])
+def test_transient_failure_on_final_attempt_fails_the_job_instead_of_retrying(
+    fake_processor: type[_FakeProcessor], monkeypatch: pytest.MonkeyPatch, db_still_down: bool
+) -> None:
+    """E.g. the last attempt could not write its result: no retry is left, so the job must
+    become terminal now (or, if the database is still down, via the stale-job reconciler)."""
+    fake_processor.behaviour = "transient"
+    fake_processor.mark_failed_raises = db_still_down
+    monkeypatch.setattr(tasks.process_document, "max_retries", 0)
+
+    def no_retry(**_: Any) -> _Retry:
+        raise AssertionError("must not retry after the final attempt")
+
+    monkeypatch.setattr(tasks.process_document, "retry", no_retry)
+    job_id = uuid.uuid4()
+    result = tasks.process_document(document_id=str(uuid.uuid4()), job_id=str(job_id))
+    assert result == "failed"
+    processor = fake_processor.instances[0]
+    assert processor.runs == [{"job_id": job_id, "is_final_attempt": True}]
+    expected = [] if db_still_down else [(job_id, RETRIES_EXHAUSTED_MESSAGE)]
+    assert processor.failed == expected
+
+
+def test_reconciler_is_scheduled_on_beat_and_registered() -> None:
+    schedule = create_celery_app().conf.beat_schedule
+    entry = schedule["reconcile-stale-jobs"]
+    assert entry["task"] == RECONCILE_STALE_JOBS_TASK
+    assert entry["schedule"] == float(get_settings().stale_job_check_interval_seconds)
+    assert RECONCILE_STALE_JOBS_TASK in celery_app.tasks
+
+
+def test_reconciler_schedule_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    disabled = get_settings().model_copy(update={"stale_job_check_interval_seconds": 0})
+    monkeypatch.setattr("app.workers.celery_app.get_settings", lambda: disabled)
+    assert not create_celery_app().conf.beat_schedule
 
 
 def test_max_claim_attempts() -> None:
