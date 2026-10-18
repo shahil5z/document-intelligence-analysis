@@ -19,6 +19,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def apply_torch_threads(num_threads: int) -> None:
+    """Cap PyTorch's intra-op thread pool for this process (0 keeps torch's default).
+
+    torch defaults to one thread per CPU core. With several API/worker processes on one
+    machine that oversubscribes the CPU: on the 8-vCPU verification box a single
+    bge-small query embedding took about 1.5 s with 8 threads and about 10-20 ms with
+    1-2 threads. The setting is process-wide, so it is applied before a model loads.
+    """
+    if num_threads <= 0:
+        return
+    import torch  # noqa: PLC0415  (lazy: only when a model is actually loaded)
+
+    if torch.get_num_threads() != num_threads:
+        torch.set_num_threads(num_threads)
+
+
 class SentenceTransformerEmbeddingProvider:
     def __init__(
         self,
@@ -28,12 +44,14 @@ class SentenceTransformerEmbeddingProvider:
         batch_size: int = 32,
         device: str = "cpu",
         query_instruction: str = "",
+        num_threads: int = 0,
     ) -> None:
         self._model_name = model_name
         self._expected_dimension = expected_dimension
         self._batch_size = batch_size
         self._device = device
         self._query_instruction = query_instruction
+        self._num_threads = num_threads
         self._model: SentenceTransformer | None = None
         self._lock = threading.Lock()
 
@@ -54,6 +72,7 @@ class SentenceTransformerEmbeddingProvider:
                 # Lazy import: torch/transformers are heavy and must not slow API startup.
                 from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
+                apply_torch_threads(self._num_threads)
                 model = SentenceTransformer(self._model_name, device=self._device)
                 getter = (
                     getattr(model, "get_embedding_dimension", None)
@@ -72,6 +91,7 @@ class SentenceTransformerEmbeddingProvider:
                         "model": self._model_name,
                         "dimension": actual,
                         "max_seq_length": model.max_seq_length,
+                        "torch_threads": self._num_threads or "default",
                         "duration_ms": round((time.perf_counter() - started) * 1000),
                     },
                 )

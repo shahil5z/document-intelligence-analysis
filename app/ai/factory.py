@@ -45,8 +45,13 @@ def get_embedding_provider(settings: Settings) -> EmbeddingProvider:
 
 
 @lru_cache
-def _cached_embedding_provider(
-    model: str, dimension: int, batch_size: int, device: str, query_instruction: str
+def _cached_embedding_provider(  # noqa: PLR0917  (lru_cache key = settings tuple)
+    model: str,
+    dimension: int,
+    batch_size: int,
+    device: str,
+    query_instruction: str,
+    num_threads: int = 0,
 ) -> SentenceTransformerEmbeddingProvider:
     return SentenceTransformerEmbeddingProvider(
         model,
@@ -54,6 +59,7 @@ def _cached_embedding_provider(
         batch_size=batch_size,
         device=device,
         query_instruction=query_instruction,
+        num_threads=num_threads,
     )
 
 
@@ -67,18 +73,21 @@ def create_embedding_provider(settings: Settings) -> SentenceTransformerEmbeddin
         settings.embedding_batch_size,
         settings.embedding_device,
         settings.embedding_query_instruction,
+        settings.torch_num_threads,
     )
 
 
 @lru_cache
-def _cached_reranker(model: str, device: str) -> CrossEncoderReranker:
-    return CrossEncoderReranker(model, device=device)
+def _cached_reranker(model: str, device: str, num_threads: int = 0) -> CrossEncoderReranker:
+    return CrossEncoderReranker(model, device=device, num_threads=num_threads)
 
 
 def create_reranker(settings: Settings) -> Reranker | None:
     if not settings.reranking_enabled:
         return None
-    return _cached_reranker(settings.reranker_model, settings.embedding_device)
+    return _cached_reranker(
+        settings.reranker_model, settings.embedding_device, settings.torch_num_threads
+    )
 
 
 @lru_cache(maxsize=4)

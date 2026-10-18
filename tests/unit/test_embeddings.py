@@ -122,6 +122,36 @@ def test_dimension_mismatch_is_a_configuration_error(monkeypatch: pytest.MonkeyP
         provider.embed(["text"])
 
 
+def test_torch_threads_are_applied_before_the_model_loads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sentence_transformers  # noqa: PLC0415
+    import torch  # noqa: PLC0415
+
+    calls: list[int] = []
+    monkeypatch.setattr(torch, "get_num_threads", lambda: 8)
+    monkeypatch.setattr(torch, "set_num_threads", calls.append)
+
+    def fake_model(*_args: Any, **_kwargs: Any) -> _FakeSentenceTransformer:
+        assert calls == [2], "threads must be capped before the model is built"
+        return _FakeSentenceTransformer(384)
+
+    monkeypatch.setattr(sentence_transformers, "SentenceTransformer", fake_model)
+    provider = SentenceTransformerEmbeddingProvider("fake", expected_dimension=384, num_threads=2)
+    provider.embed(["text"])
+    assert calls == [2]
+
+    calls.clear()
+    untouched = SentenceTransformerEmbeddingProvider("fake", expected_dimension=384)
+    monkeypatch.setattr(
+        sentence_transformers,
+        "SentenceTransformer",
+        lambda *_a, **_k: _FakeSentenceTransformer(384),
+    )
+    untouched.embed(["text"])
+    assert calls == [], "TORCH_NUM_THREADS=0 keeps torch's default"
+
+
 def test_factory_returns_cached_lazy_provider() -> None:
     settings = load_settings(_env_file=None, app_env="test", jwt_secret_key="k" * 40)
     first = create_embedding_provider(settings)

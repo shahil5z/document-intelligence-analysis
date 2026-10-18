@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     embedding_dimension: int = Field(default=384, ge=1, le=4096)
     embedding_batch_size: int = Field(default=32, ge=1, le=512)
     embedding_device: str = "cpu"
+    # PyTorch intra-op threads per process for embedding/reranking (0 = torch default,
+    # one per core). Small models are much faster with few threads when several
+    # processes share the CPU; see app/ai/embeddings.py:apply_torch_threads.
+    torch_num_threads: int = Field(default=2, ge=0, le=64)
     # Prefix the model card recommends for retrieval queries (documents get no prefix).
     embedding_query_instruction: str = "Represent this sentence for searching relevant passages: "
 
