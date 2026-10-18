@@ -142,7 +142,7 @@ test("6: search shows real extracted text", async () => {
   const first = page.getByTestId("search-result").first();
   await expect(first).toContainText("Customers may return unused items within 30 days of delivery");
   await expect(first).toContainText("refund-policy.pdf");
-  await expect(first).toContainText("page 1");
+  await expect(first).toContainText(/pages? 1/);
   await shot(page, "search");
 });
 
@@ -158,7 +158,7 @@ test("7-8: ask shows an answer with citations (stub LLM)", async () => {
   await expect(answer.getByRole("link", { name: "Citation 1" })).toBeVisible();
   const citations = page.getByTestId("citation");
   await expect(citations).toHaveCount(1);
-  await expect(citations.first()).toContainText("[1] refund-policy.pdf - page 1");
+  await expect(citations.first()).toContainText(/\[1\] refund-policy\.pdf - pages? 1/);
   await citations.first().getByText("Show cited passage").click();
   await expect(citations.first().locator("blockquote")).toContainText("30 days");
   await expect(page.getByText("AI answers can be wrong")).toBeVisible();
@@ -180,7 +180,7 @@ test("12-15: a second user cannot see, open or search the first user's document"
   await page.goto("/documents");
   await expect(page.getByText("No documents", { exact: true })).toBeVisible();
   await page.goto(`/documents/${documentId}`);
-  await expect(page.getByRole("alert")).toContainText("does not exist or you don't have access");
+  await expect(page.locator("main").getByRole("alert")).toContainText("does not exist or you don't have access");
   const direct = await page.request.get(`/api/proxy/documents/${documentId}`);
   expect(direct.status()).toBe(404);
   await page.goto("/search");
@@ -239,5 +239,5 @@ test("17-18: delete the document and verify it is gone", async () => {
   const gone = await page.request.get(`/api/proxy/documents/${documentId}`);
   expect(gone.status()).toBe(404);
   await page.goto(`/documents/${documentId}`);
-  await expect(page.getByRole("alert")).toContainText("does not exist");
+  await expect(page.locator("main").getByRole("alert")).toContainText("does not exist");
 });

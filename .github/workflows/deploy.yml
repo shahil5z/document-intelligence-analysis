@@ -1,0 +1,79 @@
+# Deploy the API to the Oracle Cloud VM after CI passes.
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   ORACLE_HOST             public IP or hostname of the VM
+#   ORACLE_USER             SSH user that owns /opt/dip (e.g. deploy)
+#   ORACLE_SSH_PRIVATE_KEY  private key for that user (dedicated deploy key)
+#   ORACLE_SSH_KNOWN_HOSTS  output of `ssh-keyscan -t ed25519 <host>` (pins the host key)
+# Optional repository variable: API_PUBLIC_URL (e.g. https://api.example.com) for the
+# final health check from GitHub. Without ORACLE_HOST the deploy job is skipped.
+name: deploy
+
+on:
+  push:
+    branches: [main, final]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (default: the commit that triggered the run)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: deploy to Oracle VM
+    needs: [ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: Check deploy secrets
+        id: gate
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          if [ -z "$HOST" ]; then
+            echo "::warning::ORACLE_HOST is not set; skipping deploy"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Configure SSH
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          SSH_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts || { echo "ORACLE_SSH_KNOWN_HOSTS is empty"; exit 1; }
+      - name: Run scripts/deploy.sh on the server
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+          USER_NAME: ${{ secrets.ORACLE_USER }}
+          REF: ${{ inputs.ref || github.sha }}
+        run: |
+          case "$REF" in *[!A-Za-z0-9._/-]*) echo "invalid ref"; exit 1 ;; esac
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$USER_NAME@$HOST" "cd /opt/dip && scripts/deploy.sh --ref '$REF'"
+      - name: Public health check
+        if: steps.gate.outputs.enabled == 'true' && vars.API_PUBLIC_URL != ''
+        env:
+          API_PUBLIC_URL: ${{ vars.API_PUBLIC_URL }}
+        run: |
+          curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "$API_PUBLIC_URL/health/ready"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$API_PUBLIC_URL/metrics")" = "404"
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

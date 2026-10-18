@@ -8,6 +8,13 @@ on:
   push:
     branches: [main, dip2, final]
   pull_request:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      e2e:
+        description: Also run the production-like Playwright E2E suite (slow)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -125,6 +132,71 @@ jobs:
           docker run --rm -e APP_ENV=test -e JWT_SECRET_KEY=ci-only-jwt-secret-that-is-long-enough-123456 \
             -e DATABASE_URL=postgresql+psycopg://u@127.0.0.1:1/dip_test \
             document-intelligence-platform:ci python -c "import app.main"
-      - name: Compose file is valid
+      - name: Compose files are valid (development and production)
         run: |
           JWT_SECRET_KEY=x POSTGRES_PASSWORD=x REDIS_PASSWORD=x docker compose config --quiet
+          printf '%s\n' POSTGRES_PASSWORD=x REDIS_PASSWORD=y JWT_SECRET_KEY=ci-only-jwt-secret-that-is-long-enough-123456 \
+            CORS_ALLOWED_ORIGINS=https://app.example.com API_DOMAIN=api.example.com CADDY_TLS=ops@example.com > ci.env
+          docker compose -f docker-compose.prod.yml --env-file ci.env config --quiet
+          docker compose -f docker-compose.prod.yml -f docker-compose.prod.e2e.yml --env-file ci.env config --quiet
+      - name: Caddyfiles are valid
+        run: |
+          docker run --rm -v "$PWD/deploy/caddy:/etc/caddy:ro" -e API_DOMAIN=api.example.com -e CADDY_TLS=internal \
+            caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f \
+            sh -c 'caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && caddy validate --config /etc/caddy/Caddyfile.e2e --adapter caddyfile'
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell scripts are shellcheck clean
+        run: cd scripts && docker run --rm -v "$PWD:/s:ro" -w /s koalaman/shellcheck:v0.10.0 -x ./*.sh
+
+  frontend:
+    name: frontend lint + typecheck + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Production build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.example.com
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
+
+  e2e:
+    name: production-like E2E (Playwright)
+    if: github.event_name == 'workflow_dispatch' && inputs.e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [frontend, docker]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: echo "127.0.0.1 api.localhost app.localhost" | sudo tee -a /etc/hosts
+      - run: scripts/e2e_prod_local.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          if-no-files-found: ignore

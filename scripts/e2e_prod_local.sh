@@ -37,13 +37,14 @@ for host in api.localhost app.localhost; do
 done
 
 mkdir -p "$E2E_DIR"
-chmod 700 "$E2E_DIR"
+# 711: containers (non-root app user) may read the CA certificate, not list the dir.
+chmod 711 "$E2E_DIR"
 if [[ ! -f "$ENV_FILE" ]]; then
   log "writing $ENV_FILE with fresh random secrets"
   umask 077
-  python3 - "$ENV_FILE" "$HTTPS_PORT" <<'PY'
+  python3 - "$ENV_FILE" "$HTTPS_PORT" "${SEED_HF_CACHE:+1}" <<'PY'
 import secrets, sys
-path, port = sys.argv[1], sys.argv[2]
+path, port, seeded = sys.argv[1], sys.argv[2], sys.argv[3]
 lines = {
     "APP_ENV": "production",
     "API_DOMAIN": "api.localhost",
@@ -57,7 +58,9 @@ lines = {
     # Only the local stub sees this value; it is not an OpenAI key.
     "OPENAI_API_KEY": "stub-" + secrets.token_hex(8),
     "E2E_FRONTEND_UPSTREAM": "host.docker.internal:3000",
-    "HF_HUB_OFFLINE": "0",
+    # With a seeded model cache, never contact Hugging Face (also avoids depending on
+    # outbound DNS from containers, which some sandboxes block).
+    "HF_HUB_OFFLINE": "1" if seeded else "0",
     # Generous limits so repeated local runs are not throttled.
     "RATE_LIMIT_REGISTER": "100/hour",
     "RATE_LIMIT_LOGIN": "100/minute",
@@ -90,6 +93,7 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 cat "$E2E_DIR/caddy-root.crt.tmp" >"$E2E_DIR/caddy-root.crt"
+chmod 644 "$E2E_DIR/caddy-root.crt"  # a public CA certificate, not a secret
 rm -f "$E2E_DIR/caddy-root.crt.tmp"
 [[ -s "$E2E_DIR/caddy-root.crt" ]] || { log "Caddy root certificate not found"; exit 1; }
 

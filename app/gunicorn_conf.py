@@ -40,6 +40,9 @@ forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "*")
 accesslog = None
 errorlog = "-"
 loglevel = os.environ.get("GUNICORN_LOG_LEVEL", "info")
+# The runtime control socket (gunicorn >= 25) is not used; /app is read-only for the
+# app user, so it would only log a permission error at startup.
+control_socket_disable = True
 worker_tmp_dir = "/dev/shm"  # noqa: S108 (heartbeat files; avoids disk-backed /tmp stalls)
 
 
