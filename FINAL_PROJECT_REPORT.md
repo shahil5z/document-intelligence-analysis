@@ -1,10 +1,119 @@
 # Final project report: Document Intelligence Platform
 
-Branch `final`. Verification ran on 2026-10-18 on the Linux build box (8 vCPU Intel Xeon,
-15 GiB RAM, Docker Compose, Python 3.12.15, uv). Nothing here was run on Windows, on
-GitHub Actions or against a real OpenAI model; those items are marked NOT VERIFIED.
-Status words: **PASS** (run here, result shown), **PARTIAL**, **NOT VERIFIED** (not run),
-**NOT IMPLEMENTED**.
+Single source of truth for what exists and what was verified. Branch `final`.
+Everything ran on 2026-10-18 on the Linux build box (8 vCPU Intel Xeon, 15 GiB RAM,
+Docker + Compose, Python 3.12, Node 22). Nothing ran on Windows, on GitHub Actions,
+on Oracle Cloud, on Vercel or against a real OpenAI model.
+
+Labels: **VERIFIED LOCALLY** (run here, result shown), **CONFIGURED BUT NOT DEPLOYED**
+(file/config exists and was validated, no live target), **REQUIRES MANUAL ACTION**
+(needs the owner's accounts), **NOT VERIFIED** (not run). Part A (sections 1-19 below
+the production part) uses the earlier words PASS / PARTIAL with the same meaning as
+VERIFIED LOCALLY / partially verified.
+
+## P. Production phase (latest)
+
+### P1. What was added
+
+| Area | Files | Status |
+| --- | --- | --- |
+| Upload-only tokens + upload policy | `app/core/security.py`, `app/api/routes/{auth,documents}.py`, `tests/api/test_upload_token.py` | VERIFIED LOCALLY |
+| S3 / OCI Object Storage backend | `app/storage/s3.py`, `app/storage/factory.py`, `tests/unit/test_storage_s3.py`, `tests/api/...` | VERIFIED LOCALLY against moto + SeaweedFS; real OCI NOT VERIFIED |
+| Production API process | `app/gunicorn_conf.py` (gunicorn + `uvicorn_worker`, 2 workers, multiprocess metrics) | VERIFIED LOCALLY |
+| Production stack | `docker-compose.prod.yml`, `deploy/caddy/Caddyfile`, `.env.production.example` | VERIFIED LOCALLY (prod-like); CONFIGURED BUT NOT DEPLOYED |
+| Local prod-like harness | `docker-compose.prod.e2e.yml`, `deploy/caddy/Caddyfile.e2e`, `scripts/e2e_prod_local.sh` | VERIFIED LOCALLY |
+| Ops scripts | `scripts/{lib_prod,setup_server,deploy,backup_postgres,restore_postgres,health_check}.sh`, `scripts/production_smoke_test.py` | VERIFIED LOCALLY |
+| Frontend | `frontend/` (Next.js 16 App Router, TypeScript, Tailwind 4, Playwright) | VERIFIED LOCALLY; Vercel CONFIGURED BUT NOT DEPLOYED |
+| Auth decision | `docs/adr/ADR-006-frontend-auth-bff.md` | - |
+| CI/CD | `.github/workflows/ci.yml` (+ shellcheck, frontend, optional e2e, prod compose/Caddy validation), `.github/workflows/deploy.yml` | actionlint clean; never run on GitHub: NOT VERIFIED |
+| Docs | README (17 sections), `docs/{local-development,production-deployment,oracle-cloud-deployment,vercel-deployment,backup-and-recovery,security}.md`, `docs/{architecture,manual-testing,deployment}.md` updated, `MANUAL_DEPLOYMENT_CHECKLIST.md`, this report | - |
+
+The backend was not rewritten: all backend changes are additive (new token type,
+new storage backend, gunicorn config, placeholder detection for `<...>` values). The
+development `docker compose up` workflow is unchanged (`docker compose config` valid;
+STORAGE_S3_* passthrough added with `local` default).
+
+### P2. Verification results (this phase)
+
+| Check | Result | Label |
+| --- | --- | --- |
+| `ruff check .` / `ruff format --check .` | clean / 184 files formatted | VERIFIED LOCALLY |
+| `mypy app tests scripts` (strict) | no issues in 154 source files | VERIFIED LOCALLY |
+| `pytest --cov=app` (PostgreSQL 16 + pgvector 0.8.7, Redis with password, SeaweedFS S3) | **414 passed, 0 skipped, 96% (3538 statements, 158 missed), 81.6 s** | VERIFIED LOCALLY |
+| Alembic on a fresh DB: upgrade, check, downgrade base, upgrade, check | "No new upgrade operations detected.", `0002 (head)` | VERIFIED LOCALLY |
+| Frontend `npm run lint` (`--max-warnings=0`), `npm run typecheck`, `npm run build` | clean, clean, build OK | VERIFIED LOCALLY |
+| Playwright E2E (`frontend/e2e/full-flow.spec.ts`) against `next start` + prod compose behind Caddy (local CA, stub LLM over HTTPS) | **10 passed (13.2 s)** | VERIFIED LOCALLY |
+| `production_smoke_test.py --register --with-llm` against `https://api.localhost:8443` | **13/13 checks PASS** (health, /metrics 404, register, login, policy, upload token + refusal elsewhere, upload 201, completed, keyword search, ask via stub, delete 204, 404) | VERIFIED LOCALLY |
+| `deploy.sh --no-pull` on the local prod stack | DEPLOY_RC=0: backup, build, migrate, all services healthy, health check "all checks passed", smoke PASS | VERIFIED LOCALLY |
+| `health_check.sh --url https://api.localhost:8443 --cacert ...` | all checks passed (6 services healthy, internal readiness, public /health/ready 200, /metrics 404, disk 47%) | VERIFIED LOCALLY |
+| Backup -> restore `--into` round trip | users 10 / documents 6 / chunks 5 / alembic 0002 in both; reuse of name refused; live restore without 2nd flag refused | VERIFIED LOCALLY |
+| Live restore drill (`--replace-live-database --i-understand-this-overwrites-data`) | after deleting all documents/chunks, counts back to 10 / 6 / 5; safety backup written; health check passed | VERIFIED LOCALLY |
+| GPG-encrypted backup restored with `--into` | users 11 / documents 6 / chunks 5 | VERIFIED LOCALLY |
+| Files archive (`--with-files`) | checksum OK; extracted file count 6 = live 6 | VERIFIED LOCALLY |
+| `setup_server.sh --skip-swap` in `ubuntu:24.04` and `ubuntu:22.04` containers with Oracle-style iptables rules, run twice | RC 0 / 0 both; Docker 29.9.1 + Compose v5.6.0 installed; ACCEPT 80/443 inserted above REJECT, no duplicates on re-run; `deploy` user, docker group, 0700 `.ssh`, 0600 `authorized_keys`, `/opt/dip`, `/var/backups/dip` | VERIFIED LOCALLY (container: systemd, swap and the ufw branch NOT VERIFIED) |
+| shellcheck (stable and v0.10.0, `-x`) on `scripts/*.sh` | clean | VERIFIED LOCALLY |
+| actionlint on `.github/workflows` | clean | VERIFIED LOCALLY |
+| `caddy validate` on both Caddyfiles; `docker compose config` (prod, prod+e2e, dev) | valid | VERIFIED LOCALLY |
+| arm64: `buildx --platform linux/arm64` of the app image | BUILD_RC=0 (first builds 210 s / 221 s; final rebuild at HEAD mostly cached), image 1.52 GB | VERIFIED LOCALLY (QEMU) |
+| arm64: import + embedding under emulation | aarch64, torch 2.14.1+cpu, sentence-transformers 6.1.0, dim 384, cosine 0.613, first embed 5.1 s / query 2.23 s (emulated, not representative of A1 speed) | VERIFIED LOCALLY (QEMU) |
+| arm64: unit test suite (`tests/unit`) in the arm64 app image under emulation | **256 passed, 12 skipped, 0 failed (163 s)**; skips: 11 S3 live-server tests (no server in that run), 1 real-Redis test (no Redis) | VERIFIED LOCALLY (QEMU) |
+| Base images are multi-arch indexes (amd64 + arm64/v8) | python 3.12-slim, uv 0.13.1, pgvector pg16, redis 7-alpine, caddy 2-alpine (2.11.7) via `imagetools inspect` | VERIFIED LOCALLY |
+| Secret scan (see P4) | placeholders / test values / false positives only | VERIFIED LOCALLY |
+| Real OpenAI `/ask` | not run (no key; never handled) | NOT VERIFIED |
+| Oracle VM, DNS, Let's Encrypt certificate, Vercel deploy, GitHub Actions runs | no accounts | REQUIRES MANUAL ACTION / NOT VERIFIED |
+| Windows PowerShell commands | written, not executed | NOT VERIFIED |
+
+Bugs found and fixed while verifying: beat inherited the image's HTTP healthcheck
+(unhealthy) and its schedule file was not a reliable heartbeat, so it got a process
+liveness check (excludes its own PID; returns 1 in api/worker containers);
+`health_check.sh` and the smoke test expected readiness `"ok"` instead of `"ready"`;
+the smoke test expected 202 for uploads (API returns 201); gunicorn's control socket
+needed a writable dir (disabled); compose project name lost under `sudo` (explicit
+`-p`); SSL_CERT_FILE permissions in the harness; two Playwright selector issues.
+
+### P3. Architecture decisions
+
+- **Auth (ADR-006)**: BFF. JWT only in an HttpOnly, SameSite=Lax (Secure on HTTPS)
+  `dip_session` cookie set by Next.js route handlers; CSRF via `X-DIP-CSRF` header +
+  Origin check; allow-listed proxy; direct browser upload with a 300 s upload-only
+  token because of Vercel's ~4.5 MB body limit and third-party-cookie blocking.
+- **Oracle**: one A1 Flex VM (2 OCPU / 12 GB), compose + Caddy auto-HTTPS on 80/443,
+  PostgreSQL/Redis on an internal network, local volume or OCI Object Storage.
+  Oracle Always Free resources are available for the life of the account within the
+  applicable Always Free limits (quotes and limits in `docs/oracle-cloud-deployment.md`).
+- **Vercel**: Root Directory `frontend`, only `NEXT_PUBLIC_API_URL`; the OpenAI key
+  stays on the VM.
+
+### P4. Secret scan (file:pattern only)
+
+Patterns: `sk-` keys, `OPENAI_API_KEY=` with a value, private-key blocks, AWS `AKIA`,
+GitHub `gh?_`, Slack `xox?-`, JWT-shaped strings, `PASSWORD=`/`SECRET_KEY=`/
+`SECRET_ACCESS_KEY=` assignments, plus the literal values of the locally generated E2E
+secrets and the local S3 test secret.
+
+| Scope | Hits (file: pattern) | Assessment |
+| --- | --- | --- |
+| `git ls-files` (11) | `.env.example`: OPENAI_API_KEY=, PASSWORD/SECRET_KEY=; `.env.production.example`: same two; `.github/workflows/ci.yml`: SECRET_KEY=; `docs/oracle-cloud-deployment.md`: PASSWORD=; `frontend/e2e/full-flow.spec.ts`: PASSWORD=; `tests/conftest.py`: PASSWORD=; `tests/unit/test_config.py`: PASSWORD=; `tests/unit/test_llm_provider.py`, `tests/unit/test_observability.py`: sk- | `replace-with-...` / `<...>` placeholders, an empty key (regex crossed the line end), `ci-only-...` values, a doc example, test-only passwords, fake `sk-test...` keys |
+| Full history, 54 commits, added lines (9) | same as tracked except the two `.env.production.example` hits (line-by-line scan; those two were cross-line false positives) | same |
+| `frontend/.next` build output, 563 files (23) | `*.nft.json`: sk- | false positive: the file path `...after-task-async-storage...`; no secret names (`OPENAI`, `JWT_SECRET`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`) in `.next/static` |
+
+No literal E2E secret or S3 test secret appears in tracked files, history or `.next`.
+`.env`, `.env.production`, `.e2e/` were never committed and are not in the bundle.
+
+### P5. Repository state
+
+| Ref | Commit | Note |
+| --- | --- | --- |
+| `main` | `2643292` | unchanged |
+| `dip2` | `7eba5a1` | unchanged |
+| `final` | see `git log` (production phase: `13f891a` ... HEAD) | 11 commits in this phase |
+
+No remote was added (the existing `origin` is the local bundle the repository was
+cloned from) and nothing was pushed. Bundle: `/workspace/dip-prod.bundle` (`final`).
+
+---
+
+# Part A: backend final phase (before the production phase)
 
 ## 1. Summary
 
@@ -266,8 +375,10 @@ benchmark only.
 
 Real OpenAI `/ask`; the Windows routes (Docker Desktop and no-Docker) and the 26-step
 PowerShell checklist; GitHub Actions run; real cross-encoder reranker; model download
-from Hugging Face inside containers (box DNS; cache was seeded); arm64 images;
-throughput/concurrency/large corpora; retrieval quality on real documents.
+from Hugging Face inside containers (box DNS; cache was seeded); arm64 on real
+hardware (emulation only, see P2); throughput/concurrency/large corpora; retrieval
+quality on real documents; every live deployment item (Oracle, DNS/TLS, Vercel, OCI
+Object Storage).
 
 ## 18. VERIFIED CV EVIDENCE
 
@@ -312,3 +423,7 @@ throughput/concurrency/large corpora; retrieval quality on real documents.
 | Real reranker | NOT VERIFIED | fake only |
 | OCR | NOT IMPLEMENTED | explicit failure message |
 | Tracing | NOT IMPLEMENTED | - |
+| Production stack (local prod-like) | VERIFIED LOCALLY | E2E 10/10, smoke 13/13, deploy.sh RC 0 |
+| Backup / restore | VERIFIED LOCALLY | round trip + live drill |
+| arm64 | VERIFIED LOCALLY (QEMU) | build, import, embedding, unit tests |
+| Live deployment | CONFIGURED BUT NOT DEPLOYED | MANUAL_DEPLOYMENT_CHECKLIST.md |

@@ -66,3 +66,15 @@ Manual checklist for Windows: [manual-testing.md](manual-testing.md).
 ruff check: clean; ruff format: 170 files formatted; mypy (strict): no issues in 147
 source files. The CI workflow was linted with actionlint 1.7.7 (exit 0) but has never
 run on GitHub.
+
+### Production phase (2026-10-18, Linux build box)
+
+- `pytest --cov=app` with PostgreSQL 16 + pgvector 0.8.7, password Redis and a local
+  S3-compatible server (`TEST_S3_*`): **414 passed, 0 skipped, 96%**.
+- `tests/unit` in the arm64 image under QEMU: 256 passed, 12 skipped (no S3 server /
+  Redis in that container).
+- Frontend: `npm run lint`, `npm run typecheck`, `npm run build` clean; Playwright
+  `frontend/e2e/full-flow.spec.ts` 10 passed against the production-like stack
+  (`scripts/e2e_prod_local.sh`).
+- `scripts/production_smoke_test.py` 13/13 checks against the local Caddy endpoint.
+- Not run: GitHub Actions, Windows, real OpenAI, real Oracle/Vercel.
