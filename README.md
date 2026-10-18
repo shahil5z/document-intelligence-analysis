@@ -5,8 +5,8 @@ The project is built in three stages:
 
 | Stage | Scope | Status |
 | --- | --- | --- |
-| **DIP1** | Foundation: auth, uploads, storage, async job pipeline, audit log, ops basics, Docker | **Implemented** (this repository) |
-| **DIP2** | Text extraction/OCR, chunking, embeddings (pgvector), semantic + hybrid search, `/ask` with citations | Planned - only extension points exist |
+| **DIP1** | Foundation: auth, uploads, storage, async job pipeline, audit log, ops basics, Docker | **Implemented** |
+| **DIP2** | Text extraction, chunking, local embeddings (pgvector), semantic / keyword / hybrid search, `/ask` with validated citations | **Implemented** (OCR not implemented) - see [DIP2_HANDOFF.md](DIP2_HANDOFF.md) |
 | **DIP3** | CI/CD, rate limiting, metrics/tracing, container hardening, final docs | Planned |
 
 ## Why
@@ -14,8 +14,10 @@ The project is built in three stages:
 Question answering over private documents is only as trustworthy as the system
 underneath it: who uploaded what, whether a file was processed, why a job failed, and
 whether one user can ever see another user's data. DIP1 builds that layer first, with
-tests against a real PostgreSQL database, so retrieval and generation can be added on
-top without reworking ownership, job tracking or storage.
+tests against a real PostgreSQL database; DIP2 adds retrieval and generation on top
+without reworking ownership, job tracking or storage: every search query is filtered by
+owner and processing status inside SQL, and answers cite only passages that were
+actually retrieved.
 
 ## Architecture overview
 
@@ -26,13 +28,17 @@ flowchart LR
     api --> redis[(Redis broker, password)]
     api --> storage[[File storage]]
     worker[Celery worker] --> redis
-    worker --> pg
+    worker -->|chunks + vectors| pg
     worker --> storage
+    worker --> model[[local embedding model]]
+    api --> model
+    api -->|/ask only| llm[OpenAI-compatible LLM]
 ```
 
 Routes -> services (transaction boundaries) -> repositories (owner-scoped queries) ->
-SQLAlchemy models. Uploads create a processing job that a Celery worker executes; job
-and document status follow an explicit state machine. Diagrams (system, upload flow,
+SQLAlchemy models. Uploads create a processing job that a Celery worker executes
+(integrity check -> extract -> normalize -> chunk -> embed -> index); job and document
+status follow an explicit state machine. Diagrams (system, upload flow,
 job flow, ER) are in [docs/architecture.md](docs/architecture.md), decisions in
 [docs/adr/](docs/adr), the full stage hand-off in [DIP1_HANDOFF.md](DIP1_HANDOFF.md).
 
@@ -40,10 +46,11 @@ job flow, ER) are in [docs/architecture.md](docs/architecture.md), decisions in
 
 Python 3.12 · FastAPI · Pydantic v2 / pydantic-settings · SQLAlchemy 2.x (sync, psycopg 3)
 · Alembic · PostgreSQL 16 (`pgvector/pgvector:pg16`) · Redis 7 · Celery 5 · PyJWT ·
-pwdlib (Argon2id) · OpenAI SDK (provider factory only, DIP2) · uv · pytest · ruff ·
-mypy (strict) · Docker / Docker Compose.
+pwdlib (Argon2id) · pypdf · python-docx · sentence-transformers (`BAAI/bge-small-en-v1.5`,
+CPU torch) · pgvector (HNSW) · PostgreSQL full-text search · httpx2 (OpenAI-compatible
+chat API) · uv · pytest · ruff · mypy (strict) · Docker / Docker Compose.
 
-## Current capabilities (DIP1)
+## Current capabilities
 
 | Area | Status |
 | --- | --- |
@@ -51,15 +58,21 @@ mypy (strict) · Docker / Docker Compose.
 | Roles `user` / `admin`, admin-only user and audit-log listing | Implemented, tested |
 | Upload PDF/DOCX/TXT with allow-list, magic-byte check, streamed size limit, SHA-256, per-user duplicate detection (409) | Implemented, tested |
 | List (paginated), detail, status, delete - strictly per owner (404 for others) | Implemented, tested |
-| Celery job per upload: claim, integrity check (size + SHA-256), complete/fail, retries for transient errors | Implemented, tested; run end to end with a real worker |
+| Celery job per upload: claim, integrity check (size + SHA-256), complete/fail, retries for transient errors, current `stage` on the job | Implemented, tested; run end to end with a real worker |
+| Text extraction: PDF (pypdf, page numbers), DOCX (python-docx, paragraphs + tables), TXT (BOM / UTF-8 / cp1252); safe failures for empty, corrupt, encrypted, scanned, binary | Implemented, tested |
+| Normalization (NFC, whitespace, control chars, hyphenation) and token-aware recursive chunking with page ranges and character offsets | Implemented, tested |
+| Local embeddings (`BAAI/bge-small-en-v1.5`, 384-d, batched, lazy-loaded) stored in pgvector (HNSW, cosine) + generated `tsvector` (GIN) | Implemented, tested (fake embedder in tests, real model in compose run and evaluation) |
+| `POST /search`: semantic, keyword (`ts_rank`), hybrid (RRF); owner + completed-status filter in SQL; optional cross-encoder reranker (off by default) | Implemented, tested; reranker tested with a fake only |
+| `POST /ask`: retrieval, evidence threshold (no LLM call below it), token-budgeted context, untrusted-source prompt, citation validation, 503 on LLM failure | Implemented, tested with a mock LLM; see DIP2_HANDOFF.md for what ran against a real endpoint |
+| `POST /documents/{id}/reprocess` (idempotent delete-then-rebuild of chunks) | Implemented, tested |
 | Audit log for register, login, failed login, upload, delete | Implemented, tested |
 | JSON logs, `X-Request-ID`, consistent error envelope, `/health`, `/health/live`, `/health/ready` | Implemented, tested |
 | Password-protected Redis; secrets validated at startup, never logged | Implemented, tested |
-| `LLMProvider` / `EmbeddingProvider` interfaces + OpenAI factory | Implemented and unit-tested with a fake client; **no OpenAI call is made anywhere in DIP1** |
-| Extraction, OCR, chunking, embeddings, vector search, hybrid retrieval, RAG `/ask` with citations | **Planned for DIP2** - not implemented |
+| OCR for scanned PDFs / images | **Not implemented** (scans fail with an explicit message) |
+| Retrieval evaluation (Recall@k, Precision@k, MRR) on a small synthetic set | Script + results in [docs/retrieval.md](docs/retrieval.md#evaluation) |
 
-A document that reaches `completed` today has been stored and integrity-verified by
-the worker; no content has been extracted from it yet.
+A document that reaches `completed` has been verified, extracted, chunked, embedded and
+indexed, and is searchable by its owner.
 
 ## Project structure
 
@@ -67,21 +80,23 @@ the worker; no content has been extracted from it yet.
 app/
   main.py                  application factory, middleware, routers
   cli.py                   python -m app.cli create-admin
-  ai/                      provider protocols + OpenAI factory (DIP2 extension point)
-  api/routes/              auth, documents, audit_logs, admin, health
+  ai/                      provider protocols, embeddings, reranker, LLM client, factories
+  api/routes/              auth, documents, search (/search, /ask), audit_logs, admin, health
   api/dependencies/        db session, auth guards, pagination, service wiring
   core/                    config, security, logging, request_context, middleware, errors
   db/                      base, session, models/, repositories/
   domain/                  enums, state_machine
+  processing/              extraction, normalization, chunking (framework-free)
   schemas/                 Pydantic request/response models
-  services/                auth, documents, audit, users, health, upload validation
+  services/                auth, documents, search, answer (RAG), retrieval (RRF), prompts, ...
   storage/                 StorageService interface, LocalStorage, factory
-  workers/                 celery_app, tasks, dispatcher, processing, pipeline
-alembic/                   env.py and versions/ (initial schema)
-tests/                     unit/, api/, integration/ (real PostgreSQL)
+  workers/                 celery_app, tasks, dispatcher, processing, pipeline, steps
+alembic/                   env.py and versions/ (0001 initial schema, 0002 document_chunks)
+tests/                     unit/, api/, integration/ (real PostgreSQL), fakes.py, fixtures/
 scripts/generate_env.py    creates .env with random secrets
-scripts/smoke_test.py      end-to-end check against a running stack
-docs/                      architecture.md, portfolio.md, adr/
+scripts/smoke_test.py      end-to-end check against a running stack (incl. search/ask)
+scripts/evaluate_retrieval.py, scripts/calibrate_evidence_threshold.py
+docs/                      architecture, document-processing, retrieval, rag, SECURITY, portfolio, adr/
 ```
 
 ## Local setup
@@ -100,8 +115,9 @@ python scripts/generate_env.py --openai-key-env OPENAI_API_KEY   # ...or from an
 The script copies `.env.example`, fills the three secrets with `secrets.token_urlsafe`
 values (URL-safe, so they need no escaping in connection URLs), refuses to overwrite an
 existing `.env` unless `--force` is given, and prints only the *names* of the keys it set.
-The key file may contain `OPENAI_API_KEY=...` or just the key. `OPENAI_API_KEY` is
-optional in DIP1. `.env` and a root-level file named `env` are git-ignored.
+The key file may contain `OPENAI_API_KEY=...` or just the key. `OPENAI_API_KEY` is only
+needed for `POST /ask`; uploads, processing and `/search` work without it. `.env` and a
+root-level file named `env` are git-ignored.
 
 ### 2a. Docker Compose (everything)
 
@@ -116,7 +132,10 @@ Services: `postgres`, `redis` (`--requirepass`), `migrate` (runs `alembic upgrad
 once), `api` (port `API_PORT`, default 8000), `worker`. Compose sets `POSTGRES_HOST` /
 `REDIS_HOST` to the service names and refuses to start if `JWT_SECRET_KEY`,
 `POSTGRES_PASSWORD` or `REDIS_PASSWORD` is empty. API and worker share the
-`storage_data` volume. Postgres and Redis are not published to the host.
+`storage_data` volume and the `model_cache` volume (`HF_HOME`), into which the embedding
+model (~130 MB) is downloaded on first use; the first document therefore takes longer.
+Set `HF_HUB_OFFLINE=1` once the cache is populated (or pre-seeded) if the containers have
+no internet access. Postgres and Redis are not published to the host.
 
 ### 2b. Python processes on the host
 
@@ -171,13 +190,29 @@ All names below appear in `.env.example`; values there are placeholders.
 | `MAX_UPLOAD_SIZE_BYTES` | `10485760` | 413 above this |
 | `ALLOWED_EXTENSIONS` / `ALLOWED_CONTENT_TYPES` | pdf,docx,txt / matching types | comma separated |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` | `*` rejected |
-| `OPENAI_API_KEY` | unset | optional; only read by `app/ai/factory.py` (DIP2) |
+| `OPENAI_API_KEY` | unset | only needed for `/ask` (`LLM_PROVIDER=openai`) |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | `sentence-transformers` / `BAAI/bge-small-en-v1.5` | only provider: sentence-transformers |
+| `EMBEDDING_DIMENSION` | `384` | must match the `vector(384)` column; verified against the loaded model |
+| `EMBEDDING_BATCH_SIZE` | `32` | passages per embedding call |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `400` / `60` | tokens of the embedding tokenizer |
+| `MAX_CHUNKS_PER_DOCUMENT` | `1000` | larger documents fail with a clear reason |
+| `HF_HUB_OFFLINE` | `0` | compose; `1` = use only the cached model |
+| `TOP_K` / `MAX_TOP_K` / `CANDIDATE_K` | `5` / `20` / `40` | results, upper bound, per-list candidates for hybrid |
+| `MAX_QUERY_LENGTH` | `1000` | characters |
+| `MIN_EVIDENCE_SIMILARITY` | `0.48` | cosine threshold for `/ask` evidence ([docs/rag.md](docs/rag.md#threshold-calibration)) |
+| `RERANKING_ENABLED` / `RERANKER_MODEL` / `RERANK_TOP_K` | `false` / `cross-encoder/ms-marco-MiniLM-L-6-v2` / `20` | optional cross-encoder |
+| `LLM_PROVIDER` | `openai` | `openai` (any OpenAI-compatible endpoint) or `none` |
+| `LLM_MODEL` / `LLM_BASE_URL` | `gpt-4o-mini` / `https://api.openai.com/v1` | |
+| `LLM_TIMEOUT_SECONDS` | `30` | hard HTTP timeout |
+| `MAX_CONTEXT_TOKENS` | `3000` | approximate token budget for retrieved context |
 | `TEST_DATABASE_URL` / `TEST_REDIS_URL` | - | tests only (commented out in `.env.example`) |
 
 Further tunables with safe defaults (not in `.env.example`): `DB_POOL_SIZE`,
 `DB_MAX_OVERFLOW`, `CELERY_TASK_MAX_RETRIES`, `CELERY_RETRY_BACKOFF_SECONDS`,
-`UPLOAD_CHUNK_SIZE_BYTES`, `JWT_ISSUER`, `OPENAI_CHAT_MODEL`, `OPENAI_EMBEDDING_MODEL`,
-`OPENAI_TIMEOUT_SECONDS`.
+`UPLOAD_CHUNK_SIZE_BYTES`, `JWT_ISSUER`, `EMBEDDING_DEVICE`, `EMBEDDING_QUERY_INSTRUCTION`,
+`MAX_DOCX_UNCOMPRESSED_BYTES`, `LLM_MAX_OUTPUT_TOKENS`, `LLM_TEMPERATURE`, and the DIP1
+SDK-adapter settings `OPENAI_CHAT_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_TIMEOUT_SECONDS`
+(not used by `/ask`, which reads `LLM_*`).
 
 Invalid configuration stops startup with a message such as
 `SettingsError: Invalid configuration: JWT_SECRET_KEY is required but not set`; messages
@@ -192,13 +227,17 @@ uv run alembic revision -m "describe change"   # then edit the generated file by
 ```
 
 Revision `0001` creates the four tables and ENUM types and enables the `vector`
-extension. Never edit an applied revision; add a new one.
+extension. Revision `0002` adds `document_chunks` (`vector(384)` with an HNSW cosine
+index, generated `tsvector` with a GIN index, unique `(document_id, chunk_index)`,
+cascading deletes) and `document_processing_jobs.stage`. Never edit an applied
+revision; add a new one.
 
 ## Tests and quality checks
 
 Tests need a disposable PostgreSQL database (the suite runs the Alembic migrations and
-truncates tables after each test). Celery is replaced by a recording fake and OpenAI by
-a fake client, so neither Redis nor network access is required. Two readiness tests
+truncates tables after each test). Celery is replaced by a recording fake, the embedding
+model by a deterministic hashing embedder and the LLM by a mock, so neither Redis, model
+downloads nor network access are required. Two readiness tests
 additionally run when `TEST_REDIS_URL` points at a Redis (one needs a password in it).
 
 ```bash
@@ -210,7 +249,37 @@ uv run pytest --cov=app
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
-Last recorded run: see [DIP1_HANDOFF.md](DIP1_HANDOFF.md#12-tests-executed-and-real-results).
+Last recorded run: see [DIP2_HANDOFF.md](DIP2_HANDOFF.md#tests-executed-and-real-results).
+
+## Using search and ask
+
+PowerShell users: replace `\` line continuations with backticks or put each command on
+one line. Outputs are not shown here; response shapes are in
+[docs/retrieval.md](docs/retrieval.md#api) and [docs/rag.md](docs/rag.md#response).
+
+```bash
+BASE=http://localhost:8000
+curl -s -X POST $BASE/auth/register -H 'Content-Type: application/json' \
+  -d '{"email":"me@example.com","password":"a-long-enough-password"}'
+TOKEN=$(curl -s -X POST $BASE/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"me@example.com","password":"a-long-enough-password"}' | jq -r .access_token)
+
+# upload, then poll until status is "completed" (job.stage shows the current step)
+DOC=$(curl -s -X POST $BASE/documents -H "Authorization: Bearer $TOKEN" \
+  -F "file=@policy.pdf;type=application/pdf" | jq -r .id)
+curl -s $BASE/documents/$DOC/status -H "Authorization: Bearer $TOKEN"
+
+# search: mode = semantic | keyword | hybrid (default); optional document_id
+curl -s -X POST $BASE/search -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query":"refund window","mode":"hybrid","top_k":5}'
+
+# ask: grounded answer with citations (needs OPENAI_API_KEY; otherwise 503)
+curl -s -X POST $BASE/ask -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"question":"How many days do customers have to return items?"}'
+
+# reprocess a completed or failed document
+curl -s -X POST $BASE/documents/$DOC/reprocess -H "Authorization: Bearer $TOKEN"
+```
 
 ## API documentation
 
@@ -228,8 +297,11 @@ ReDoc at `/redoc`, schema at `/openapi.json`.
 | POST | `/documents` | user | multipart upload, queues processing |
 | GET | `/documents` | user | `page`, `page_size` (max 100) |
 | GET | `/documents/{id}` | user | metadata |
-| GET | `/documents/{id}/status` | user | status + latest job |
-| DELETE | `/documents/{id}` | user | delete record, jobs and file (204) |
+| GET | `/documents/{id}/status` | user | status + latest job (with `stage`) + `chunk_count` |
+| POST | `/documents/{id}/reprocess` | user | queue a new job for a completed/failed document (202; 409 while busy) |
+| DELETE | `/documents/{id}` | user | delete record, jobs, chunks and file (204) |
+| POST | `/search` | user | semantic / keyword / hybrid retrieval over own completed documents |
+| POST | `/ask` | user | grounded answer with citations; 503 if the LLM is unavailable |
 | GET | `/audit-logs/me` | user | own audit entries |
 | GET | `/admin/users` | admin | all users |
 | GET | `/admin/audit-logs` | admin | all audit entries, filters `user_id`, `action` |
@@ -249,23 +321,28 @@ Errors always look like
   placeholder secrets; `.env`/`env` git-ignored; log redaction of sensitive keys.
 - Redis requires a password; Postgres/Redis are not exposed by compose.
 - CORS restricted to configured origins; containers run as a non-root user.
+- Retrieval: owner and completed-status filters inside every chunk query; `/ask` prompt
+  keeps retrieved text in an escaped `<untrusted_sources>` block; citations restricted to
+  sent sources; no secrets or document text in logs. Details: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Roadmap
 
-- **DIP2** - extraction (PDF, DOCX, TXT; OCR for scans), chunking, embeddings with
-  pgvector, semantic + hybrid search, `/ask` with cited answers. Where each piece goes:
-  [DIP1_HANDOFF.md](DIP1_HANDOFF.md#17-extension-points-for-dip2).
+- **DIP2** - implemented except OCR: [DIP2_HANDOFF.md](DIP2_HANDOFF.md).
 - **DIP3** - GitHub Actions CI/CD, rate limiting, metrics and tracing, container
   scanning and hardening, final docs: [DIP3_HANDOFF.md](DIP3_HANDOFF.md).
 
 ## Known limitations
 
-- No content processing yet: `completed` means stored and integrity-verified.
+- No OCR: scanned PDFs fail with an explicit message.
+- Retrieval quality was measured only on 18 synthetic queries over 6 short documents;
+  latency, throughput and index behaviour at scale are not measured.
+- The `/ask` evidence threshold (0.48) was calibrated on that small set only.
+- Citations show which retrieved passage the model pointed at; there is no entailment check.
 - The multipart body is fully received (spooled by Starlette) before the size limit is
   applied while copying to storage; there is no request-size limit in front of parsing.
 - DOCX validation only checks the ZIP signature.
-- If the broker is down at upload time the document is marked `failed`; there is no
-  re-process endpoint yet, and the duplicate check means the user must delete and re-upload.
+- If the broker is down at upload time the document is marked `failed`; it can be
+  retried with `POST /documents/{id}/reprocess`.
 - No rate limiting, account lockout, refresh tokens or token revocation.
 - The Redis password is passed to `redis-server` as a command-line argument (visible to
   anyone who can run `docker inspect` on the host).

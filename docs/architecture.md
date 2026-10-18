@@ -1,6 +1,8 @@
 # Architecture
 
-Status: DIP1 (backend foundation). Items marked *planned* do not exist in the code yet.
+Status: DIP1 (backend foundation) + DIP2 (document intelligence: extraction, chunking,
+embeddings, retrieval, `/ask`). Details of DIP2 parts: [document-processing.md](document-processing.md),
+[retrieval.md](retrieval.md), [rag.md](rag.md), [SECURITY.md](SECURITY.md).
 
 ## System overview
 
@@ -11,8 +13,11 @@ flowchart LR
     api -->|publish documents.process, AUTH| redis[(Redis<br/>Celery broker, requirepass)]
     api -->|save / delete| storage[[Storage volume<br/>LocalStorage]]
     worker[Celery worker<br/>app/workers] -->|consume, AUTH| redis
-    worker -->|claim / update job| pg
+    worker -->|claim / update job, write chunks + vectors| pg
     worker -->|read| storage
+    worker -->|embed passages| model[[bge-small-en-v1.5<br/>local, HF cache volume]]
+    api -->|embed queries| model
+    api -->|/ask only, HTTPS| llm[OpenAI-compatible<br/>chat completions]
     migrate[migrate service<br/>alembic upgrade head] --> pg
 ```
 
@@ -29,7 +34,8 @@ flowchart LR
 | Storage | `app/storage/` | `StorageService` interface + `LocalStorage` with traversal guard. |
 | Workers | `app/workers/` | Celery app, task adapter, framework-free `DocumentProcessor`, pipeline steps. |
 | Core | `app/core/` | Settings, security (Argon2, JWT), JSON logging, request context, errors, middleware. |
-| AI providers | `app/ai/` | `LLMProvider` / `EmbeddingProvider` protocols and an OpenAI-backed factory for DIP2. Not used by any DIP1 code path. |
+| AI providers | `app/ai/` | `LLMProvider` / `EmbeddingProvider` / `Reranker` protocols; local sentence-transformers embeddings, optional cross-encoder, OpenAI-compatible HTTP chat client; lazy, cached factories. (DIP1's OpenAI SDK adapters remain but are not wired.) |
+| Processing | `app/processing/` | Framework-free extraction (PDF/DOCX/TXT), normalization and token-aware chunking. |
 
 ## Upload flow
 
@@ -73,7 +79,9 @@ sequenceDiagram
     R->>W: documents.process(document_id, job_id, request_id)
     W->>D: SELECT job FOR UPDATE; skip if missing/terminal
     W->>D: job -> processing, attempts+1, started_at; document -> processing; COMMIT
-    W->>S: pipeline steps (today: integrity_check = exists + size + sha256)
+    W->>S: integrity_check, extract (read file)
+    W->>W: normalize, chunk, embed (no DB transaction open)
+    W->>D: index: lock document, DELETE + INSERT chunks; COMMIT
     alt success
         W->>D: job completed, completed_at; document completed; COMMIT
     else permanent error
@@ -98,8 +106,8 @@ stateDiagram-v2
         processing --> completed
         processing --> failed
         processing --> queued: transient retry
-        completed --> queued: reprocess (planned)
-        failed --> queued: reprocess (planned)
+        completed --> queued: POST /reprocess
+        failed --> queued: POST /reprocess
     }
 ```
 
@@ -107,8 +115,8 @@ Jobs: `pending -> queued -> processing -> {completed | failed | retrying}`,
 `retrying -> {processing | failed}`, `pending/queued -> failed`. `completed` and `failed`
 are terminal; reprocessing creates a new job row.
 
-`completed` currently means *stored and integrity-verified*. No text extraction occurs
-yet; DIP2 adds steps inside `processing`.
+`completed` means *verified, extracted, chunked, embedded and indexed* (searchable).
+The current step is stored in `document_processing_jobs.stage`.
 
 ## Data model
 
@@ -117,6 +125,8 @@ erDiagram
     users ||--o{ documents : owns
     users |o--o{ audit_logs : "acts (SET NULL on delete)"
     documents ||--o{ document_processing_jobs : "has (CASCADE)"
+    documents ||--o{ document_chunks : "has (CASCADE)"
+    users ||--o{ document_chunks : "owns (CASCADE)"
     users {
         uuid id PK
         varchar email UK
@@ -146,10 +156,27 @@ erDiagram
         varchar task_id
         text error_message
         int attempts
+        varchar stage "DIP2"
         timestamptz started_at
         timestamptz completed_at
         timestamptz created_at
         timestamptz updated_at
+    }
+    document_chunks {
+        uuid id PK
+        uuid document_id FK
+        uuid owner_id FK
+        int chunk_index "UK with document_id"
+        text content
+        tsvector content_tsv "generated, GIN"
+        int page_start
+        int page_end
+        int char_start
+        int char_end
+        int token_count
+        vector embedding "384, HNSW cosine"
+        varchar embedding_model
+        timestamptz created_at
     }
     audit_logs {
         uuid id PK
@@ -164,7 +191,33 @@ erDiagram
 
 Indexes: `users.email` (unique), `documents.owner_id`, `documents.status`,
 `(owner_id, created_at)`, unique `(owner_id, checksum_sha256)`, unique `storage_key`,
-`document_processing_jobs.document_id/status/task_id`, `audit_logs.user_id/action/created_at`.
+`document_processing_jobs.document_id/status/task_id`, `audit_logs.user_id/action/created_at`,
+`document_chunks.owner_id`, unique `(document_id, chunk_index)`, GIN `content_tsv`,
+HNSW `embedding vector_cosine_ops`.
+
+## Search and ask flow
+
+```mermaid
+flowchart LR
+    q[POST /search or /ask] --> v[validate query, top_k]
+    v --> e[embed query<br/>bge-small + instruction]
+    v --> k[keyword: tsvector OR-query, ts_rank]
+    e --> s[semantic: pgvector cosine]
+    s & k --> f{mode}
+    f -->|hybrid| r[RRF k=60, dedupe, tie-break by id]
+    f -->|semantic / keyword| o[single list]
+    r --> rr[optional cross-encoder rerank]
+    o --> rr
+    rr --> out[/search response]
+    rr --> g{similarity >= threshold?}
+    g -->|no| ie[insufficient evidence, no LLM call]
+    g -->|yes| c[context builder: dedupe, token budget]
+    c --> l[LLM: system rules + question + untrusted sources]
+    l --> cv[citation validation against sent sources]
+    cv --> ans[/ask response]
+```
+
+Both SQL queries filter by owner and `status = 'completed'` inside the statement.
 
 ## Authentication flow
 
@@ -198,12 +251,15 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
   containing password/token/secret/authorization; Celery prints the broker as `redis://:**@...`.
 - **Redis**: `--requirepass` in compose; the API, worker and readiness check use the
   authenticated URL built from `REDIS_*`. Unauthenticated commands get `NOAUTH`.
-- **OpenAI key**: optional; read only when a DIP2 provider is requested through
-  `app/ai/factory.py`. The SDK is not imported at API/worker startup.
+- **OpenAI key**: optional; read only when `/ask` needs the LLM
+  (`app/ai/factory.py::create_llm_provider`). Neither the OpenAI SDK nor torch is
+  imported at API/worker startup. DIP2 specifics: [SECURITY.md](SECURITY.md).
 - **CORS**: explicit origins only; `*` rejected at startup.
 - **Containers**: non-root user (uid 10001); Postgres/Redis are not published to the host.
+- **Retrieval isolation (DIP2)**: chunk queries filter by owner and completed status in
+  SQL; `/ask` only sees the caller's chunks.
 - **Not yet**: rate limiting, account lockout, token revocation, refresh tokens, request
-  body limit before multipart parsing, malware scanning (see DIP3 handoff).
+  body limit before multipart parsing, malware scanning, parser sandboxing (see DIP3 handoff).
 
 ## Observability
 
@@ -219,11 +275,11 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 
 | Stage | Hook | Location |
 | --- | --- | --- |
-| DIP2 | Add `PipelineStep`s (extract, chunk, embed) | `app/workers/pipeline.py::build_default_pipeline` |
-| DIP2 | New tables (`document_chunks` with `vector` column) | new Alembic revision after `0001` |
-| DIP2 | Search / ask routes and services | `app/api/routes/`, `app/services/`, register in `app/api/router.py` |
-| DIP2 | Object storage backend | implement `StorageService`, add to `SUPPORTED_BACKENDS` in `app/storage/factory.py` |
-| DIP2 | LLM / embedding calls | `app/ai/factory.py` (`get_llm_provider`, `get_embedding_provider`) |
+| DIP2 (done) | Pipeline steps extract/normalize/chunk/embed/index | `app/workers/steps.py::build_indexing_pipeline` |
+| DIP2 (done) | `document_chunks` with `vector(384)` + `tsvector` | migration `0002` |
+| DIP2 (done) | `/search`, `/ask`, `/documents/{id}/reprocess` | `app/api/routes/search.py`, `documents.py` |
+| Later | Object storage backend | implement `StorageService`, add to `SUPPORTED_BACKENDS` in `app/storage/factory.py` |
+| Later | OCR for scanned PDFs | fallback in `app/processing/extraction.py::PdfExtractor` |
 | DIP3 | Rate limiting middleware/dependency | `app/main.py::_register_middleware` |
 | DIP3 | Metrics/tracing | `app/core/middleware.py`, `app/core/logging.py` |
 | DIP3 | CI | commands listed in [DIP3_HANDOFF.md](../DIP3_HANDOFF.md) |
