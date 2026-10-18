@@ -33,6 +33,9 @@ class DocumentProcessingJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     task_id: Mapped[str | None] = mapped_column(String(255), index=True)
     error_message: Mapped[str | None] = mapped_column(Text)
+    # Last pipeline step started (integrity_check, extract, ..., index); kept on failure
+    # so the status endpoint shows where processing stopped.
+    stage: Mapped[str | None] = mapped_column(String(32))
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
