@@ -34,6 +34,11 @@ class ProcessingJobRead(BaseModel):
     id: uuid.UUID
     status: JobStatus
     attempts: int
+    stage: str | None = Field(
+        default=None,
+        description="Last pipeline step started: integrity_check, extract, normalize, chunk, "
+        "embed or index.",
+    )
     error_message: str | None = Field(
         default=None, description="Safe, user-facing failure reason (no internal details)."
     )
@@ -47,3 +52,4 @@ class DocumentStatusResponse(BaseModel):
     document_id: uuid.UUID
     status: DocumentStatus
     job: ProcessingJobRead | None
+    chunk_count: int = Field(default=0, description="Indexed chunks (searchable when completed).")

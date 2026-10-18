@@ -99,6 +99,31 @@ def get_document_status(
         document_id=view.document.id,
         status=view.document.status,
         job=ProcessingJobRead.model_validate(view.job) if view.job else None,
+        chunk_count=view.chunk_count,
+    )
+
+
+@router.post(
+    "/{document_id}/reprocess",
+    response_model=DocumentUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Reprocess a document",
+    description=(
+        "Queue a new processing job for a `completed` or `failed` document (for example "
+        "after a failed run or a chunking change). The document is not searchable until "
+        "the new job completes. 409 while it is queued or processing."
+    ),
+    responses=error_responses(401, 404, 409, 422),
+)
+def reprocess_document(
+    document_id: uuid.UUID, user: CurrentUser, documents: DocumentServiceDep
+) -> DocumentUploadResponse:
+    result = documents.reprocess(owner=user, document_id=document_id)
+    return DocumentUploadResponse(
+        id=result.document.id,
+        status=result.document.status,
+        job_id=result.job.id,
+        job_status=result.job.status,
     )
 
 
@@ -106,7 +131,7 @@ def get_document_status(
     "/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a document",
-    description="Deletes the record, its jobs and the stored file.",
+    description="Deletes the record, its jobs, its indexed chunks and the stored file.",
     responses=error_responses(401, 404, 422),
 )
 def delete_document(

@@ -20,9 +20,11 @@ Backend foundation for a document intelligence platform.
 
 * **Auth** - register, log in (JSON or OAuth2 form), JWT bearer tokens, user/admin roles.
 * **Documents** - validated uploads (PDF, DOCX, TXT), per-user isolation, deletion.
-* **Processing** - each upload creates a job executed asynchronously by a Celery worker.
-  The worker currently verifies the stored file's integrity; text extraction, chunking,
-  embeddings, search and question answering are planned and **not implemented yet**.
+* **Processing** - each upload creates a job executed asynchronously by a Celery worker:
+  integrity check, text extraction (PDF/DOCX/TXT, no OCR), normalization, token-aware
+  chunking, local embeddings and indexing in PostgreSQL (pgvector + full-text).
+* **Search** - semantic, keyword or hybrid (RRF) retrieval over your completed documents.
+* **Ask** - grounded answers with citations validated against the retrieved passages.
 * **Audit** - security-relevant actions are recorded and queryable.
 
 Every response carries an `X-Request-ID` header; errors use a single envelope:
@@ -32,6 +34,7 @@ Every response carries an `X-Request-ID` header; errors use a single envelope:
 OPENAPI_TAGS = [
     {"name": "auth", "description": "Registration, login and the current user."},
     {"name": "documents", "description": "Upload, list, inspect and delete your documents."},
+    {"name": "search", "description": "Retrieval and question answering over your documents."},
     {"name": "audit", "description": "Your own audit trail."},
     {"name": "admin", "description": "Administrator-only endpoints."},
     {"name": "health", "description": "Liveness and readiness probes."},

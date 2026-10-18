@@ -17,6 +17,7 @@ from app.core.config import Settings
 from app.core.errors import ConflictError, NotFoundError
 from app.core.request_context import set_document_id
 from app.db.models import Document, DocumentProcessingJob, User
+from app.db.repositories.chunks import ChunkRepository
 from app.db.repositories.documents import DocumentRepository
 from app.db.repositories.jobs import ProcessingJobRepository
 from app.domain.enums import AuditAction, DocumentStatus, JobStatus, ResourceType
@@ -35,7 +36,10 @@ from app.storage.base import StorageService
 logger = logging.getLogger(__name__)
 
 DOCUMENT_NOT_FOUND = "Document not found"
-ENQUEUE_FAILED_MESSAGE = "Processing could not be scheduled. Delete the document and upload again."
+ENQUEUE_FAILED_MESSAGE = (
+    "Processing could not be scheduled. Reprocess the document or delete and upload it again."
+)
+REPROCESSABLE_STATUSES = frozenset({DocumentStatus.COMPLETED, DocumentStatus.FAILED})
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,7 @@ class UploadResult:
 class DocumentStatusView:
     document: Document
     job: DocumentProcessingJob | None
+    chunk_count: int = 0
 
 
 class DocumentService:
@@ -200,8 +205,36 @@ class DocumentService:
     def get_status(self, *, owner: User, document_id: uuid.UUID) -> DocumentStatusView:
         document = self.get_document(owner=owner, document_id=document_id)
         return DocumentStatusView(
-            document=document, job=self._jobs.latest_for_document(document.id)
+            document=document,
+            job=self._jobs.latest_for_document(document.id),
+            chunk_count=ChunkRepository(self._session).count_for_document(document.id),
         )
+
+    def reprocess(self, *, owner: User, document_id: uuid.UUID) -> UploadResult:
+        """Queue a new processing job for a completed or failed document.
+
+        Existing chunks stay in place but are not searchable while the document is not
+        ``completed``; the index step replaces them atomically.
+        """
+        document = self.get_document(owner=owner, document_id=document_id)
+        if document.status not in REPROCESSABLE_STATUSES:
+            raise ConflictError("The document is already queued or being processed")
+        job = DocumentProcessingJob(
+            document_id=document.id, status=JobStatus.PENDING, task_id=str(uuid.uuid4())
+        )
+        self._jobs.add(job)
+        transition_document(document, DocumentStatus.QUEUED)
+        transition_job(job, JobStatus.QUEUED)
+        self._audit.record(
+            AuditAction.DOCUMENT_REPROCESS_REQUESTED,
+            user_id=owner.id,
+            resource_type=ResourceType.DOCUMENT,
+            resource_id=document.id,
+        )
+        self._session.commit()
+        result = UploadResult(document=document, job=job)
+        self._enqueue(result)
+        return result
 
     def delete_document(self, *, owner: User, document_id: uuid.UUID) -> None:
         document = self.get_document(owner=owner, document_id=document_id)
