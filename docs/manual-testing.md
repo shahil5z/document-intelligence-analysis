@@ -349,3 +349,43 @@ Safe procedure; the key never appears on screen or in git:
 
 No paid request was made while preparing this project; the real-OpenAI path is
 **NOT VERIFIED** (see FINAL_PROJECT_REPORT.md).
+
+---
+
+## Web UI walkthrough (frontend)
+
+Prerequisite: the backend from steps 1-5 is running and the frontend runs locally
+(`cd frontend; Copy-Item .env.example .env.local; npm ci; npm run dev`), or use the
+deployed Vercel URL. Use two different browser profiles (or a private window) for the
+second user. Status: the same flow is automated in `frontend/e2e/full-flow.spec.ts`
+(10 Playwright tests, passed against the local production-like stack); clicking
+through it by hand on Windows is NOT VERIFIED.
+
+| # | Action | Expected |
+| --- | --- | --- |
+| U1 | Open `/` | landing page with "Get started" / "Sign in"; `/architecture` shows the diagram |
+| U2 | Open `/dashboard` while signed out | redirected to `/login?next=/dashboard` |
+| U3 | Register with a new e-mail and a password of 12+ characters | redirected to the dashboard; e-mail shown in the header |
+| U4 | DevTools > Application > Cookies | `dip_session` is `HttpOnly`, `SameSite=Lax` (and `Secure` on HTTPS); Local/Session Storage contain no token |
+| U5 | Upload > choose a PDF (< 10 MB) | progress bar, then a link to the document; status goes Queued -> Processing -> Completed |
+| U6 | Upload a `.png` or a file > 10 MB | friendly error, nothing uploaded |
+| U7 | Documents | list with status badges, filter box, pagination when > 1 page |
+| U8 | Open the document | metadata, latest job and stage, chunk count; Reprocess and Delete buttons |
+| U9 | Search > hybrid / semantic / keyword for a phrase in the document | ranked passages with document name, page numbers and score |
+| U10 | Ask a question answered by the document | without an OpenAI key: "AI answers are not configured" message; with a key or the stub LLM: an answer with `[S1]` citations listing the passages |
+| U11 | Ask an unrelated question | "Not enough evidence" card, no LLM call, no citations |
+| U12 | Second user: open the first user's document URL `/documents/<id>` | "not found" (never the other user's data); their search finds nothing of the first user's |
+| U13 | Reprocess the document twice quickly | the second request shows a "Conflict" error (the document is already being processed) |
+| U14 | Delete the document (confirm dialog) | removed from the list; its URL now shows "not found" |
+| U15 | Settings > Sign out | back on the landing page; `/dashboard` redirects to login again |
+| U16 | Mobile width (DevTools device toolbar) | navigation collapses into a menu; pages remain usable |
+
+## Production checks (after deploying)
+
+| # | Command | Expected |
+| --- | --- | --- |
+| P1 | `scripts/health_check.sh --url https://<API_DOMAIN>` (on the VM) | every line `ok`, "all checks passed" |
+| P2 | `Invoke-WebRequest https://<API_DOMAIN>/metrics -SkipHttpErrorCheck` | `404` |
+| P3 | `py -3.12 scripts\production_smoke_test.py --base-url https://<API_DOMAIN> --register` (with `$env:SMOKE_EMAIL`, `$env:SMOKE_PASSWORD`) | `RESULT: PASS` |
+| P4 | Browser on the Vercel URL: U3, U5, U9, U10 | same as above; no CORS errors in the console |
+| P5 | `scripts/restore_postgres.sh --file <latest dump> --into dip_restore_check` | counts equal the live database |

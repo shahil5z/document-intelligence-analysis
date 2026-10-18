@@ -4,7 +4,9 @@ Status: DIP1 (backend foundation) + DIP2 (document intelligence: extraction, chu
 embeddings, retrieval, `/ask`) + DIP3 (production hardening). Details of DIP2 parts: [document-processing.md](document-processing.md),
 [retrieval.md](retrieval.md), [rag.md](rag.md), [security.md](security.md). DIP3:
 [observability.md](observability.md), [testing.md](testing.md),
-[deployment.md](deployment.md), [performance.md](performance.md).
+[deployment.md](deployment.md), [performance.md](performance.md). Production phase:
+[frontend + production topology](#frontend-and-production-topology),
+[production-deployment.md](production-deployment.md), [ADR-006](adr/ADR-006-frontend-auth-bff.md).
 
 ## Request path (DIP3)
 
@@ -338,3 +340,43 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 | DIP3 (done) | Metrics | `app/core/metrics.py`, `app/core/middleware.py`, `app/api/routes/metrics.py` |
 | DIP3 (done; linted and run locally, never on GitHub) | CI | `.github/workflows/ci.yml` |
 | Later | Tracing | wrap `RequestContextMiddleware` / pipeline steps with OpenTelemetry spans |
+
+## Frontend and production topology
+
+```mermaid
+flowchart LR
+    b[Browser] -->|HTML, /api/auth/*, /api/proxy/*| n[Next.js on Vercel]
+    n -->|server-side fetch, Bearer from HttpOnly cookie| c[Caddy :443]
+    b -->|POST /documents, upload-only token| c
+    c --> a[api: gunicorn x2 uvicorn workers]
+    a --> p[(postgres)]
+    a --> r[(redis)]
+    w[worker x2 processes] --> p
+    w --> r
+    bt[beat x1] --> r
+    a --> s[[volume or OCI Object Storage]]
+    w --> s
+```
+
+- **Frontend** (`frontend/`, Next.js 16 App Router): route groups `(public)` (landing,
+  architecture, login, register) and `(app)` (dashboard, upload, documents, document
+  detail, search, ask, settings). `src/proxy.ts` redirects signed-out users from
+  `(app)` routes to `/login?next=...`. Client components call same-origin route
+  handlers through `src/lib/client/api.ts`; data loading uses a small
+  `useApiResource` hook with skeleton, empty and error states.
+- **Session** (ADR-006): `/api/auth/login|register` call the API server-side and set an
+  HttpOnly `dip_session` cookie; `/api/proxy/[...path]` maps an allow-list of API
+  routes and adds the bearer token; state-changing calls require `X-DIP-CSRF: 1` and a
+  same-origin `Origin`. The browser never holds the access token.
+- **Uploads** bypass Vercel (body limit ~4.5 MB): `/api/auth/upload-token` returns a
+  300-second token with `type=upload` that the API accepts only on `POST /documents`;
+  the browser sends the multipart request straight to the API (XHR, progress events),
+  which is why the API's CORS allows the frontend origin.
+- **Storage**: `STORAGE_BACKEND=local` (shared volume), `s3` or `oci` (`app/storage/s3.py`,
+  boto3, path-style SigV4; OCI via its S3 compatibility endpoint). Keys are the same
+  server-generated `documents/<owner>/<uuid>.<ext>` in every backend.
+- **Production processes** (`docker-compose.prod.yml`): the API runs under gunicorn
+  (`app/gunicorn_conf.py`, `uvicorn_worker.UvicornWorker`, multi-process Prometheus
+  metrics in a tmpfs); the Celery worker no longer embeds beat, a single `beat` service
+  schedules the stale-job reconciler; `migrate` runs once per deploy. PostgreSQL and
+  Redis are on an internal network; only Caddy publishes ports.

@@ -1,5 +1,11 @@
 # Deployment
 
+This page covers the development/reference compose file (`docker-compose.yml`) and
+image maintenance. The production setup (gunicorn, separate beat, Caddy, ops scripts,
+CI/CD) is in [production-deployment.md](production-deployment.md); Oracle and Vercel
+specifics in [oracle-cloud-deployment.md](oracle-cloud-deployment.md) and
+[vercel-deployment.md](vercel-deployment.md).
+
 ## Compose (reference deployment)
 
 ```bash
@@ -35,6 +41,7 @@ for readability:
 | `ghcr.io/astral-sh/uv` | `0.13.1@sha256:4a1f3666...` | Dockerfile |
 | `pgvector/pgvector` | `pg16@sha256:7b822b0a...` | compose, CI |
 | `redis` | `7-alpine@sha256:858f009f...` | compose, CI |
+| `caddy` | `2-alpine@sha256:d8542f48...` (2.11.7) | `docker-compose.prod.yml` |
 
 To bump: resolve the new index digest, replace it everywhere, rebuild and rerun tests
 and the smoke test.
@@ -104,5 +111,5 @@ run on GitHub** (no remote).
 
 ## Not done
 
-Image vulnerability scanning, read-only root filesystem, secrets manager, CD/release
-pipeline, horizontal scaling of storage (local volume only), model revision pinning.
+Image vulnerability scanning, read-only root filesystem, secrets manager, release
+versioning (CD over SSH exists: `deploy.yml`, never run on GitHub), horizontal scaling of storage (local volume only), model revision pinning.
