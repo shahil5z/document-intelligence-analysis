@@ -20,11 +20,13 @@ FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    STORAGE_PATH=/data/storage
+    STORAGE_PATH=/data/storage \
+    HF_HOME=/data/models
 
+# /data/models holds the Hugging Face cache (embedding model, downloaded on first use).
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app \
-    && mkdir -p /data/storage \
+    && mkdir -p /data/storage /data/models \
     && chown -R app:app /data
 
 COPY --from=builder /opt/venv /opt/venv
