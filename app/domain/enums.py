@@ -11,9 +11,9 @@ class UserRole(StrEnum):
 class DocumentStatus(StrEnum):
     """Lifecycle of an uploaded document.
 
-    ``completed`` currently means "stored and verified by the worker". Content
-    extraction, chunking and embedding are not implemented yet (planned for DIP2);
-    they will run inside the ``processing`` state.
+    ``completed`` means the stored file was verified, its text extracted, normalized,
+    chunked, embedded and indexed (DIP2): the document is searchable. All of that runs
+    inside ``processing``; ``failed`` carries a safe reason on the job.
     """
 
     UPLOADED = "uploaded"
@@ -38,8 +38,15 @@ class AuditAction(StrEnum):
     USER_LOGIN_FAILED = "user.login_failed"
     DOCUMENT_UPLOADED = "document.uploaded"
     DOCUMENT_DELETED = "document.deleted"
+    DOCUMENT_REPROCESS_REQUESTED = "document.reprocess_requested"
 
 
 class ResourceType(StrEnum):
     USER = "user"
     DOCUMENT = "document"
+
+
+class SearchMode(StrEnum):
+    SEMANTIC = "semantic"
+    KEYWORD = "keyword"
+    HYBRID = "hybrid"

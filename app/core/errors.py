@@ -92,6 +92,18 @@ class InvalidUploadError(AppError):
     message = "Invalid upload"
 
 
+class InvalidQueryError(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "validation_error"
+    message = "Invalid query"
+
+
+class ServiceUnavailableError(AppError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_unavailable"
+    message = "Service temporarily unavailable"
+
+
 def error_body(
     code: str, message: str, details: Sequence[dict[str, Any]] | None = None
 ) -> dict[str, Any]:
