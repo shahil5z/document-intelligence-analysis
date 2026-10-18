@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.errors import AppError, ConflictError, NotFoundError
+from app.core.errors import AppError, ConflictError, NotFoundError, ServiceUnavailableError
 from app.core.metrics import UPLOADS
 from app.core.request_context import set_document_id
 from app.db.models import Document, DocumentProcessingJob, User
@@ -32,7 +32,7 @@ from app.services.upload_validation import (
     validate_file_type,
     validated_chunks,
 )
-from app.storage.base import StorageService
+from app.storage.base import StorageError, StorageKeyError, StorageService
 
 logger = logging.getLogger(__name__)
 
@@ -102,16 +102,23 @@ class DocumentService:
         generated_filename = f"{document_id.hex}.{extension}"
         storage_key = f"documents/{owner.id}/{generated_filename}"
         digest = StreamDigest()
-        self._storage.save(
-            storage_key,
-            validated_chunks(
-                incoming.stream,
-                extension=extension,
-                max_size=self._settings.max_upload_size_bytes,
-                chunk_size=self._settings.upload_chunk_size_bytes,
-                digest=digest,
-            ),
-        )
+        try:
+            self._storage.save(
+                storage_key,
+                validated_chunks(
+                    incoming.stream,
+                    extension=extension,
+                    max_size=self._settings.max_upload_size_bytes,
+                    chunk_size=self._settings.upload_chunk_size_bytes,
+                    digest=digest,
+                ),
+            )
+        except StorageKeyError:
+            raise
+        except StorageError as exc:
+            # e.g. object storage unreachable; the client can retry the upload.
+            logger.warning("document.storage_unavailable", extra={"error_type": type(exc).__name__})
+            raise ServiceUnavailableError("File storage is temporarily unavailable") from exc
 
         try:
             result = self._persist_upload(

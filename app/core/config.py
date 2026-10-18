@@ -88,6 +88,16 @@ class Settings(BaseSettings):
 
     storage_backend: str = "local"
     storage_path: Path = Path("./storage_data")
+    # STORAGE_BACKEND=s3 (any S3-compatible service) or oci (OCI Object Storage through
+    # its S3 compatibility API, https://<namespace>.compat.objectstorage.<region>.oraclecloud.com).
+    storage_s3_bucket: str | None = None
+    storage_s3_endpoint_url: str | None = None
+    storage_s3_region: str = "us-east-1"
+    storage_s3_access_key_id: SecretStr | None = None
+    storage_s3_secret_access_key: SecretStr | None = None
+    storage_s3_prefix: str = ""
+    # path-style is what OCI's compatibility API supports; MinIO accepts both.
+    storage_s3_addressing_style: Literal["path", "virtual", "auto"] = "path"
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
     upload_chunk_size_bytes: int = Field(default=1024 * 1024, ge=1024)
     allowed_extensions: Annotated[list[str], NoDecode] = ["pdf", "docx", "txt"]
@@ -260,6 +270,10 @@ class Settings(BaseSettings):
         "redis_url",
         "celery_broker_url",
         "celery_result_backend",
+        "storage_s3_bucket",
+        "storage_s3_endpoint_url",
+        "storage_s3_access_key_id",
+        "storage_s3_secret_access_key",
         mode="before",
     )
     @classmethod
@@ -303,6 +317,30 @@ class Settings(BaseSettings):
             problems.append("CELERY_TASK_SOFT_TIME_LIMIT must be below CELERY_TASK_TIME_LIMIT")
         if self.stale_job_timeout_seconds <= self.celery_task_time_limit:
             problems.append("STALE_JOB_TIMEOUT_SECONDS must exceed CELERY_TASK_TIME_LIMIT")
+        problems.extend(self._object_storage_problems())
+        return problems
+
+    def _object_storage_problems(self) -> list[str]:
+        if self.storage_backend not in {"s3", "oci"}:
+            return []
+        problems: list[str] = []
+        required = {
+            "STORAGE_S3_BUCKET": self.storage_s3_bucket,
+            "STORAGE_S3_ACCESS_KEY_ID": self.storage_s3_access_key_id,
+            "STORAGE_S3_SECRET_ACCESS_KEY": self.storage_s3_secret_access_key,
+        }
+        if self.storage_backend == "oci":
+            required["STORAGE_S3_ENDPOINT_URL"] = self.storage_s3_endpoint_url
+        problems.extend(
+            f"{name} is required when STORAGE_BACKEND={self.storage_backend}"
+            for name, value in required.items()
+            if value is None
+        )
+        endpoint = self.storage_s3_endpoint_url
+        if endpoint is not None and not endpoint.startswith(("https://", "http://")):
+            problems.append("STORAGE_S3_ENDPOINT_URL must be an http(s) URL")
+        if self.storage_s3_prefix.startswith("/") or ".." in self.storage_s3_prefix:
+            problems.append("STORAGE_S3_PREFIX must be a relative key prefix")
         return problems
 
     def _production_problems(self) -> list[str]:

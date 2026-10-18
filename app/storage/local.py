@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.storage.base import StorageKeyError, StorageService
 
-_KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$")
+KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$")
 
 
 class LocalStorage(StorageService):
@@ -19,7 +19,7 @@ class LocalStorage(StorageService):
     def _path_for(self, key: str) -> Path:
         # Two independent guards: a strict key grammar, and a resolved-path containment check
         # (which also defeats symlinks pointing outside the root).
-        if not _KEY_PATTERN.fullmatch(key) or ".." in key.split("/"):
+        if not KEY_PATTERN.fullmatch(key) or ".." in key.split("/"):
             raise StorageKeyError("Invalid storage key")
         path = (self._root / key).resolve()
         if not path.is_relative_to(self._root) or path == self._root:

@@ -21,10 +21,10 @@ def test_unknown_backend_is_rejected_clearly(tmp_path: Path) -> None:
         _env_file=None,
         app_env="test",
         jwt_secret_key="k" * 40,
-        storage_backend="S3",
+        storage_backend="AzureBlob",
         storage_path=tmp_path,
     )
-    with pytest.raises(StorageConfigurationError, match="Unsupported STORAGE_BACKEND 's3'"):
+    with pytest.raises(StorageConfigurationError, match="Unsupported STORAGE_BACKEND 'azureblob'"):
         build_storage_service(settings)
 
 

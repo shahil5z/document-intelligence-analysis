@@ -5,9 +5,11 @@ description = "Backend foundation for a document intelligence platform: authenti
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.0",
+    "boto3>=1.43.114",
     "celery>=5.6.3",
     "email-validator>=2.3.0",
     "fastapi>=0.143.3",
+    "gunicorn>=26.2.0",
     "httpx2>=2.13.1",
     "numpy>=2.5.4",
     "openai>=3.35.1",
@@ -43,8 +45,10 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
 
 [dependency-groups]
 dev = [
+    "boto3-stubs[s3]>=1.43.114",
     "celery-types>=0.26.0",
     "httpx2>=2.13.1",
+    "moto[s3]>=5.2.4",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",

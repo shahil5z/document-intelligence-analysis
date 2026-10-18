@@ -59,6 +59,7 @@ from app.db.session import get_session_factory  # noqa: E402
 from app.domain.enums import UserRole  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.processing.chunking import ApproximateTokenCounter  # noqa: E402
+from app.storage.base import StorageService  # noqa: E402
 from app.storage.local import LocalStorage  # noqa: E402
 from app.workers.processing import DocumentProcessor, JobOutcome  # noqa: E402
 from app.workers.steps import build_indexing_pipeline  # noqa: E402
@@ -165,7 +166,7 @@ def app(
 
 def run_indexing(
     job_id: uuid.UUID,
-    storage: LocalStorage,
+    storage: StorageService,
     embedder: HashingEmbeddingProvider,
     settings: Settings | None = None,
 ) -> JobOutcome:
@@ -187,7 +188,7 @@ def upload_and_index(
     client: TestClient,
     headers: dict[str, str],
     dispatcher: RecordingDispatcher,
-    storage: LocalStorage,
+    storage: StorageService,
     embedder: HashingEmbeddingProvider,
     file: tuple[str, bytes, str],
     settings: Settings | None = None,
