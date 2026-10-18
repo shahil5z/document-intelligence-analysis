@@ -7,13 +7,15 @@ import uuid
 
 from celery import Task
 
+from app.ai.factory import create_embedding_provider
 from app.core.config import get_settings
 from app.core.request_context import RequestContext, bind_context, reset_context
 from app.db.session import get_session_factory
 from app.storage.factory import get_storage_service
 from app.workers.celery_app import celery_app
-from app.workers.pipeline import TransientProcessingError, build_default_pipeline
+from app.workers.pipeline import TransientProcessingError
 from app.workers.processing import DocumentProcessor
+from app.workers.steps import build_indexing_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +38,18 @@ def process_document(
         RequestContext(request_id=request_id or str(self.request.id), document_id=document_id)
     )
     try:
+        settings = get_settings()
+        # Cached per worker process; the model itself loads on the first embed call.
+        embedder = create_embedding_provider(settings)
         processor = DocumentProcessor(
             session_factory=get_session_factory(),
             storage=get_storage_service(),
-            pipeline=build_default_pipeline(),
+            pipeline=build_indexing_pipeline(
+                settings=settings,
+                session_factory=get_session_factory(),
+                embedder=embedder,
+                token_counter=embedder,
+            ),
         )
         retries = int(self.request.retries or 0)
         try:

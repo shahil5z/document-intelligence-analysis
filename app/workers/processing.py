@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
+from sqlalchemy import update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -59,7 +60,7 @@ class DocumentProcessor:
             return JobOutcome.SKIPPED
 
         try:
-            self._pipeline.run(context)
+            self._pipeline.run(context, on_step=lambda name: self._record_stage(job_id, name))
         except PermanentProcessingError as exc:
             logger.warning("job.failed", extra={"job_id": str(job_id), "reason": exc.safe_message})
             self._finish(job_id, JobStatus.FAILED, exc.safe_message)
@@ -117,6 +118,20 @@ class DocumentProcessor:
             session.commit()
             logger.info("job.started", extra={"job_id": str(job_id), "attempt": job.attempts})
             return context
+
+    def _record_stage(self, job_id: uuid.UUID, stage: str) -> None:
+        """Persist the current step in its own short transaction (best effort)."""
+        try:
+            with session_scope(self._session_factory) as session:
+                session.execute(
+                    update(DocumentProcessingJob)
+                    .where(DocumentProcessingJob.id == job_id)
+                    .values(stage=stage)
+                )
+                session.commit()
+        except OperationalError:
+            logger.warning("job.stage_not_persisted", extra={"job_id": str(job_id)})
+        logger.info("job.stage", extra={"job_id": str(job_id), "stage": stage})
 
     def _load(
         self, session: Session, job_id: uuid.UUID

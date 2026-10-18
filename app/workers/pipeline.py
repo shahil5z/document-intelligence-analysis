@@ -1,17 +1,23 @@
 """Processing pipeline extension point.
 
-The worker calls ``DocumentPipeline.run`` while the job is in ``processing``. Today the
-only step verifies that the stored bytes still match the size and SHA-256 recorded at
-upload time. Text extraction, chunking and embeddings (DIP2) are added as further steps.
+The worker calls ``DocumentPipeline.run`` while the job is in ``processing``. The first
+step verifies that the stored bytes still match the size and SHA-256 recorded at upload
+time. DIP2 adds extract -> normalize -> chunk -> embed -> index (``app/workers/steps.py``,
+assembled by ``build_indexing_pipeline``); intermediate results live in
+``PipelineContext.state``.
 """
 
 import hashlib
 import uuid
-from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Protocol
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol
 
 from app.storage.base import StorageService
+
+if TYPE_CHECKING:
+    from app.processing.chunking import TextChunk
+    from app.processing.content import DocumentContent
 
 
 class PermanentProcessingError(Exception):
@@ -26,6 +32,15 @@ class TransientProcessingError(Exception):
     """A failure worth retrying (e.g. a temporarily unavailable dependency)."""
 
 
+@dataclass
+class PipelineState:
+    """Mutable hand-over between steps of one attempt (never persisted as a whole)."""
+
+    content: "DocumentContent | None" = None
+    chunks: "list[TextChunk]" = field(default_factory=list)
+    embeddings: list[list[float]] = field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class PipelineContext:
     document_id: uuid.UUID
@@ -35,6 +50,7 @@ class PipelineContext:
     file_size: int
     checksum_sha256: str
     storage: StorageService
+    state: PipelineState = field(default_factory=PipelineState)
 
 
 class PipelineStep(Protocol):
@@ -66,10 +82,14 @@ class DocumentPipeline:
     def step_names(self) -> tuple[str, ...]:
         return tuple(step.name for step in self._steps)
 
-    def run(self, context: PipelineContext) -> None:
+    def run(self, context: PipelineContext, on_step: Callable[[str], None] | None = None) -> None:
         for step in self._steps:
+            if on_step is not None:
+                on_step(step.name)
             step.run(context)
 
 
 def build_default_pipeline() -> DocumentPipeline:
+    """Integrity check only (the DIP1 pipeline). The worker uses ``build_indexing_pipeline``
+    from ``app.workers.steps``, which starts with this same step."""
     return DocumentPipeline([IntegrityCheckStep()])
