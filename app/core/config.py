@@ -9,7 +9,7 @@ input values.
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
@@ -104,6 +104,46 @@ class Settings(BaseSettings):
         "http://localhost:5173",
     ]
 
+    # --- DIP2: document processing, retrieval and question answering ----------------
+    # Models are loaded lazily on first use (worker: first document; API: first search),
+    # never at startup, in health checks or in the test suite.
+    embedding_provider: Literal["sentence-transformers"] = "sentence-transformers"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Must equal the vector column size created by migration 0002 (vector(384)). The
+    # provider verifies the loaded model's dimension against this value.
+    embedding_dimension: int = Field(default=384, ge=1, le=4096)
+    embedding_batch_size: int = Field(default=32, ge=1, le=512)
+    embedding_device: str = "cpu"
+    # Prefix the model card recommends for retrieval queries (documents get no prefix).
+    embedding_query_instruction: str = "Represent this sentence for searching relevant passages: "
+
+    chunk_size: int = Field(default=400, ge=32, le=4000, description="Tokens per chunk.")
+    chunk_overlap: int = Field(default=60, ge=0, le=1000, description="Tokens of overlap.")
+    max_chunks_per_document: int = Field(default=1000, ge=1, le=100_000)
+    # Decompressed-size ceiling for DOCX archives (zip-bomb guard).
+    max_docx_uncompressed_bytes: int = Field(default=100 * 1024 * 1024, ge=1024)
+
+    top_k: int = Field(default=5, ge=1, le=100)
+    max_top_k: int = Field(default=20, ge=1, le=100)
+    candidate_k: int = Field(default=40, ge=1, le=1000)
+    max_query_length: int = Field(default=1000, ge=1, le=10_000)
+    # Cosine similarity a retrieved chunk needs to count as evidence for /ask.
+    min_evidence_similarity: float = Field(default=0.55, ge=-1.0, le=1.0)
+
+    reranking_enabled: bool = False
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_top_k: int = Field(default=20, ge=1, le=200)
+
+    # "openai": any OpenAI-compatible /chat/completions endpoint (LLM_BASE_URL) using
+    # OPENAI_API_KEY. "none": /ask answers 503 when evidence exists; /search still works.
+    llm_provider: Literal["openai", "none"] = "openai"
+    llm_model: str = "gpt-4o-mini"
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    llm_max_output_tokens: int = Field(default=700, ge=16, le=8192)
+    llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_context_tokens: int = Field(default=3000, ge=100, le=100_000)
+
     @field_validator("allowed_extensions", mode="before")
     @classmethod
     def _parse_extensions(cls, value: object) -> object:
@@ -184,6 +224,14 @@ class Settings(BaseSettings):
                     )
         if self.app_env is Environment.PRODUCTION and self.debug:
             problems.append("DEBUG must be false when APP_ENV=production")
+        if self.chunk_overlap >= self.chunk_size:
+            problems.append("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
+        if self.top_k > self.max_top_k:
+            problems.append("TOP_K must not exceed MAX_TOP_K")
+        if self.candidate_k < self.max_top_k:
+            problems.append("CANDIDATE_K must be at least MAX_TOP_K")
+        if not self.llm_base_url.startswith(("https://", "http://")):
+            problems.append("LLM_BASE_URL must be an http(s) URL")
         if problems:
             raise ValueError("; ".join(problems))
         return self
