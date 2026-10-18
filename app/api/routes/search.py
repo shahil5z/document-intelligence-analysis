@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies.auth import CurrentUser
 from app.api.dependencies.rate_limit import limit_by_user
-from app.api.dependencies.services import AnswerServiceDep, SearchServiceDep
+from app.api.dependencies.services import AnswerServiceDep, DemoServiceDep, SearchServiceDep
 from app.api.responses import error_responses
 from app.schemas.search import (
     AskRequest,
@@ -74,13 +74,19 @@ def search(body: SearchRequest, user: CurrentUser, service: SearchServiceDep) ->
         "reaches the evidence threshold, an insufficient-evidence answer is returned "
         "without calling the LLM. 503 if the LLM is unavailable or not configured."
     ),
-    responses=error_responses(401, 404, 422, 429, 503),
-    dependencies=[Depends(limit_by_user("ask"))],
+    responses=error_responses(401, 403, 404, 422, 429, 503),
+    dependencies=[Depends(limit_by_user("ask", "ask_daily"))],
 )
-def ask(body: AskRequest, user: CurrentUser, service: AnswerServiceDep) -> AskResponse:
-    result = service.ask(
-        owner=user, question=body.question, top_k=body.top_k, document_id=body.document_id
-    )
+def ask(
+    body: AskRequest, user: CurrentUser, service: AnswerServiceDep, demo: DemoServiceDep
+) -> AskResponse:
+    # Demo accounts: one question is reserved atomically (403 demo_limit_reached at the
+    # limit) and given back when the LLM was never called.
+    with demo.question(user) as reservation:
+        result = service.ask(
+            owner=user, question=body.question, top_k=body.top_k, document_id=body.document_id
+        )
+        reservation.llm_called = result.model is not None
     return AskResponse(
         answer=result.answer,
         insufficient_evidence=result.insufficient_evidence,
@@ -107,4 +113,5 @@ def ask(body: AskRequest, user: CurrentUser, service: AnswerServiceDep) -> AskRe
         missing_information=result.missing_information,
         insufficient_reason=result.insufficient_reason,
         prompt_version=result.prompt_version,
+        demo_questions_remaining=demo.remaining_questions(user),
     )

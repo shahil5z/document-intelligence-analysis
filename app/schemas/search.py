@@ -94,3 +94,6 @@ class AskResponse(BaseModel):
         Literal["below_threshold", "model_declined", "parse_failed", "no_valid_citations"] | None
     ) = Field(default=None, description="Why no grounded answer was produced.")
     prompt_version: str = Field(description="Version of the prompt files in app/prompt/.")
+    demo_questions_remaining: int | None = Field(
+        default=None, description="Questions left for a demo account; null for regular users."
+    )

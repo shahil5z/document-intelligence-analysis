@@ -66,6 +66,10 @@ class AuthService:
         if not self._hasher.verify(password, user.password_hash):
             self._record_failed_login(user, "invalid_credentials")
             raise AuthenticationError(INVALID_CREDENTIALS_MESSAGE)
+        if user.is_demo:
+            # Demo accounts have no usable password; refuse like a wrong password.
+            self._record_failed_login(user, "demo_account")
+            raise AuthenticationError(INVALID_CREDENTIALS_MESSAGE)
         if not user.is_active:
             self._record_failed_login(user, "inactive_account")
             raise PermissionDeniedError("This account is disabled")

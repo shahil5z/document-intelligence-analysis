@@ -4,13 +4,26 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.api.dependencies.auth import CurrentUser
-from app.api.dependencies.rate_limit import enforce_rate_limit, limit_by_ip
-from app.api.dependencies.services import AuthServiceDep
+from app.api.dependencies.rate_limit import (
+    GLOBAL_IDENTIFIER,
+    enforce_rate_limit,
+    limit_by_ip,
+    limit_by_user,
+)
+from app.api.dependencies.services import AuthServiceDep, DemoServiceDep
 from app.api.dependencies.settings import AppSettings
 from app.api.responses import error_responses
+from app.core.config import Settings
 from app.core.security import create_upload_token
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UploadTokenResponse
-from app.schemas.user import UserRead
+from app.db.models import User
+from app.schemas.auth import (
+    DemoSessionResponse,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UploadTokenResponse,
+)
+from app.schemas.user import DemoStatus, UserRead
 from app.services.auth_service import normalize_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -23,7 +36,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     summary="Register a new user",
     description="Creates a regular user account. Self-registration never grants the admin role.",
     responses=error_responses(409, 422, 429),
-    dependencies=[Depends(limit_by_ip("register"))],
+    dependencies=[Depends(limit_by_ip("register", "register_daily"))],
 )
 def register(body: RegisterRequest, auth: AuthServiceDep) -> UserRead:
     user = auth.register(email=body.email, password=body.password)
@@ -71,8 +84,75 @@ def token(
     summary="Current user",
     responses=error_responses(401, 403),
 )
-def me(user: CurrentUser) -> UserRead:
-    return UserRead.model_validate(user)
+def me(user: CurrentUser, settings: AppSettings) -> UserRead:
+    return user_read(user, settings)
+
+
+def demo_status(user: User, settings: Settings) -> DemoStatus | None:
+    if not user.is_demo:
+        return None
+    return DemoStatus(
+        questions_used=user.demo_questions_used,
+        questions_limit=settings.demo_max_questions,
+        questions_remaining=max(0, settings.demo_max_questions - user.demo_questions_used),
+        uploads_used=user.demo_uploads_used,
+        uploads_limit=settings.demo_max_uploads,
+        max_upload_bytes=min(settings.demo_max_upload_bytes, settings.max_upload_size_bytes),
+        allowed_extensions=list(settings.demo_allowed_extensions),
+        expires_at=user.demo_expires_at,
+    )
+
+
+def user_read(user: User, settings: Settings) -> UserRead:
+    read = UserRead.model_validate(user)
+    read.demo = demo_status(user, settings)
+    return read
+
+
+@router.post(
+    "/demo",
+    response_model=DemoSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Start a demo session",
+    description=(
+        "Creates an ephemeral, isolated demo account and returns its access token. Demo "
+        "accounts cannot log in with a password, may upload one PDF (`DEMO_MAX_UPLOADS`, "
+        "`DEMO_MAX_UPLOAD_BYTES`) and ask `DEMO_MAX_QUESTIONS` questions; beyond that the "
+        "API answers 403 `demo_limit_reached`. They are deleted with their files after "
+        "`DEMO_TTL_HOURS`. Rate-limited per client IP (`RATE_LIMIT_DEMO`) and globally "
+        "(`RATE_LIMIT_DEMO_GLOBAL`)."
+    ),
+    responses=error_responses(403, 429, 503),
+    dependencies=[Depends(limit_by_ip("demo"))],
+)
+def start_demo(
+    request: Request, demo: DemoServiceDep, settings: AppSettings
+) -> DemoSessionResponse:
+    enforce_rate_limit(request, "demo_global", GLOBAL_IDENTIFIER)
+    session = demo.create()
+    status_ = demo_status(session.user, settings)
+    if status_ is None:  # pragma: no cover - create() always makes a demo user
+        raise RuntimeError("demo user expected")
+    return DemoSessionResponse(
+        access_token=session.access_token, expires_in=session.expires_in, demo=status_
+    )
+
+
+@router.post(
+    "/demo/convert",
+    response_model=UserRead,
+    summary="Turn the current demo session into a free account",
+    description=(
+        "Sets an email and password on the demo account and removes its demo limits and "
+        "expiry; uploaded documents are kept. Log in with the new credentials afterwards."
+    ),
+    responses=error_responses(401, 403, 409, 422, 429),
+    dependencies=[Depends(limit_by_ip("register", "register_daily"))],
+)
+def convert_demo(
+    body: RegisterRequest, user: CurrentUser, demo: DemoServiceDep, settings: AppSettings
+) -> UserRead:
+    return user_read(demo.convert(user, email=body.email, password=body.password), settings)
 
 
 @router.post(
@@ -86,7 +166,8 @@ def me(user: CurrentUser) -> UserRead:
         "uploads do not pass through the proxy. Requires a normal access token; an upload "
         "token cannot mint another one."
     ),
-    responses=error_responses(401, 403),
+    responses=error_responses(401, 403, 429),
+    dependencies=[Depends(limit_by_user("upload_token"))],
 )
 def upload_token(user: CurrentUser, settings: AppSettings) -> UploadTokenResponse:
     token, expires_in = create_upload_token(user_id=user.id, role=user.role, settings=settings)

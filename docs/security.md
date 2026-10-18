@@ -29,15 +29,37 @@ search/ask with a foreign `document_id`, audit log - all 404 or empty for anothe
 ## Rate limiting
 
 Fixed-window counters in Redis (INCR + EXPIRE; keys contain a SHA-256 of the IP or
-e-mail, never the raw value). Scopes: register and login per IP, login per e-mail,
-upload/search/ask/reprocess per user. Exceeding a limit returns 429 with `Retry-After`.
+e-mail, never the raw value). Exceeding a limit returns 429 `rate_limited` with
+`Retry-After` (seconds until the window ends); the frontend shows "Too many requests -
+try again in N seconds/minutes".
+
+### Rate limits
+
+| Endpoint | Scope (setting `RATE_LIMIT_*`) | Key | Default (class / `.env.example`) | `docker-compose.prod.yml` | Redis down |
+| --- | --- | --- | --- | --- | --- |
+| `POST /auth/register` | `REGISTER` + `REGISTER_DAILY` | IP | 5/minute + 20/day | 10/hour + 20/day | 503 (closed) |
+| `POST /auth/login`, `/auth/token` | `LOGIN` | IP | 10/minute | 10/minute | 503 (closed) |
+| same | `LOGIN_PER_EMAIL` | e-mail | 5/minute | 5/minute | 503 (closed) |
+| `POST /auth/demo` | `DEMO` | IP | 3/day | 3/day | 503 (closed) |
+| same | `DEMO_GLOBAL` | one global key | 200/day | 200/day | 503 (closed) |
+| `POST /auth/demo/convert` | `REGISTER` + `REGISTER_DAILY` | IP | as register | as register | 503 (closed) |
+| `POST /auth/upload-token` | `UPLOAD_TOKEN` | user | 30/minute | 30/minute | open |
+| `POST /documents` | `UPLOAD` + `UPLOAD_DAILY` | user | 10/minute + 100/day | 30/day + 100/day | open |
+| `POST /search` | `SEARCH` | user | 60/minute | 60/minute | open |
+| `POST /ask` | `ASK` + `ASK_DAILY` | user | 10/minute + 200/day | 20/hour + 200/day | open |
+| `POST /documents/{id}/reprocess` | `REPROCESS` | user | 10/minute | 20/day | open |
+
+Read-only authenticated endpoints (lists, details, status, `/auth/me`) are not limited.
+Demo accounts additionally have hard usage limits ([demo-mode.md](demo-mode.md)).
+"IP" is the TCP peer, or the `X-DIP-Client-IP` header when it comes with the
+`CLIENT_IP_HEADER_SECRET` (the BFF; see demo-mode.md#per-ip-limits-behind-the-bff).
 
 **When Redis is unavailable** (`app/api/dependencies/rate_limit.py`):
 
 | Scope | Decision | Response |
 | --- | --- | --- |
-| `register`, `login`, `login_per_email` | **fail closed** | 503 `Sign-in and registration are temporarily unavailable; retry later`, `Retry-After: 5`; the password is not checked |
-| `upload`, `search`, `ask`, `reprocess` | **fail open** | request proceeds |
+| `register`, `register_daily`, `login`, `login_per_email`, `demo`, `demo_global` | **fail closed** | 503 `Sign-in and registration are temporarily unavailable; retry later`, `Retry-After: 5`; the password is not checked |
+| `upload`, `upload_daily`, `upload_token`, `search`, `ask`, `ask_daily`, `reprocess` | **fail open** | request proceeds |
 
 Both paths increment `dip_rate_limiter_errors_total{scope,decision}` and log
 `rate_limit.backend_unavailable` with `error_type` only. Rationale: an attacker who can
@@ -170,9 +192,9 @@ Decision record: [ADR-006](adr/ADR-006-frontend-auth-bff.md).
   internet route. The API port 8000 and the worker exporter 9100 are internal only.
 - CORS is restricted to the configured frontend origin(s) (`CORS_ALLOWED_ORIGINS`,
   https only in production).
-- Public-demo rate limits in `docker-compose.prod.yml` (register 10/hour, login
-  10/minute + 5/minute per e-mail, upload 30/day, search 60/minute, ask 20/hour,
-  reprocess 20/day). Behind Vercel the per-IP limits count Vercel egress IPs.
+- Public-demo rate limits in `docker-compose.prod.yml` (table above). Behind Vercel the
+  per-IP limits count Vercel egress IPs unless `CLIENT_IP_HEADER_SECRET` /
+  `DIP_CLIENT_IP_SECRET` are set.
 - Missing `OPENAI_API_KEY` is not an error: `/ask` answers 503 "not configured", the
   rest works.
 - `.env.production` must be mode 0600 (the scripts warn otherwise) and is git-ignored;

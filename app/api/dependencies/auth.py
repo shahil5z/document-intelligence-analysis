@@ -18,6 +18,7 @@ from app.core.security import (
 from app.db.models import User
 from app.db.repositories.users import UserRepository
 from app.domain.enums import UserRole
+from app.services.demo_service import reject_expired_demo
 
 # tokenUrl points at the OAuth2 form endpoint so Swagger UI's "Authorize" button works.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
@@ -54,6 +55,7 @@ def _resolve_user(
     user = UserRepository(session).get(payload.subject)
     if user is None:
         raise AuthenticationError("Could not validate credentials")
+    reject_expired_demo(user)
     set_user_id(str(user.id))
     return user
 

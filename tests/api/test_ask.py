@@ -123,6 +123,7 @@ def test_insufficient_evidence_skips_the_llm(
         "missing_information": None,
         "insufficient_reason": "below_threshold",
         "prompt_version": PROMPT_VERSION,
+        "demo_questions_remaining": None,
     }
     assert llm.calls == []
 

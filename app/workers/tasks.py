@@ -13,8 +13,9 @@ from app.ai.factory import create_embedding_provider
 from app.core.config import get_settings
 from app.core.request_context import RequestContext, bind_context, reset_context
 from app.db.session import get_session_factory
+from app.services.demo_service import cleanup_expired_demo_users
 from app.storage.factory import get_storage_service
-from app.workers.celery_app import RECONCILE_STALE_JOBS_TASK, celery_app
+from app.workers.celery_app import CLEANUP_DEMO_USERS_TASK, RECONCILE_STALE_JOBS_TASK, celery_app
 from app.workers.pipeline import TransientProcessingError
 from app.workers.processing import RETRIES_EXHAUSTED_MESSAGE, DocumentProcessor, JobOutcome
 from app.workers.reconcile import reconcile_stale_jobs
@@ -99,3 +100,9 @@ def reconcile_stale_jobs_task() -> int:
     return reconcile_stale_jobs(
         get_session_factory(), timeout_seconds=get_settings().stale_job_timeout_seconds
     )
+
+
+@celery_app.task(name=CLEANUP_DEMO_USERS_TASK, ignore_result=True)
+def cleanup_expired_demo_users_task() -> int:
+    """Periodic (beat) task: delete expired demo users and their files (demo_service)."""
+    return cleanup_expired_demo_users(get_session_factory(), get_storage_service())

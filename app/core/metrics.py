@@ -62,6 +62,11 @@ ASK_REQUESTS = Counter(
     "not_configured).",
     ("outcome",),
 )
+DEMO_EVENTS = Counter(
+    "dip_demo_events_total",
+    "Demo-mode events (created, converted, limit_questions, limit_uploads, expired_deleted).",
+    ("event",),
+)
 LLM_LATENCY = Histogram(
     "dip_llm_request_duration_seconds",
     "LLM call latency by outcome (ok or error).",

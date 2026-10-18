@@ -18,9 +18,9 @@ from pydantic import SecretStr
 
 from app.api.dependencies.auth import get_current_active_user
 from app.api.dependencies.services import get_auth_service, get_search_service
-from app.core.config import Environment, Settings, get_settings
+from app.core.config import Environment, Settings, SettingsError, get_settings, load_settings
 from app.core.errors import AuthenticationError, ConflictError
-from app.domain.enums import SearchMode
+from app.domain.enums import SearchMode, UserRole
 from app.main import create_app
 from app.services.search_service import SearchResult
 
@@ -189,6 +189,99 @@ def test_authenticated_limits_are_per_user(fake_auth: _FakeAuth) -> None:
     assert second == 200
 
 
+def test_daily_window_applies_after_the_per_minute_one(fake_auth: _FakeAuth) -> None:
+    app = _limited(fake_auth, rate_limit_register="100/minute", rate_limit_register_daily="2/day")
+    body = {"email": "new@example.com", "password": "a-long-enough-password"}
+    before = _sample("dip_rate_limited_total", {"scope": "register_daily"})
+    with _client(app) as client:
+        statuses = [client.post("/auth/register", json=body).status_code for _ in range(3)]
+        blocked = client.post("/auth/register", json=body)
+    assert statuses == [409, 409, 429]
+    # Retry-After reflects the daily window (the rest of the UTC day), not a minute.
+    assert int(blocked.headers["retry-after"]) >= 1
+    assert _sample("dip_rate_limited_total", {"scope": "register_daily"}) == before + 2
+
+
+def test_upload_token_is_rate_limited_per_user(fake_auth: _FakeAuth) -> None:
+    app = _limited(fake_auth, rate_limit_upload_token="2/minute")
+    user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.USER)
+    app.dependency_overrides[get_current_active_user] = lambda: user
+    with _client(app) as client:
+        statuses = [client.post("/auth/upload-token").status_code for _ in range(3)]
+    assert statuses == [200, 200, 429]
+
+
+CLIENT_SECRET = "s" * 32
+
+
+def _register_twice(app: FastAPI, headers: list[dict[str, str]]) -> list[int]:
+    body = {"email": "new@example.com", "password": "a-long-enough-password"}
+    with _client(app) as client:
+        return [client.post("/auth/register", json=body, headers=h).status_code for h in headers]
+
+
+def test_trusted_bff_can_name_the_client_ip(fake_auth: _FakeAuth) -> None:
+    app = _limited(
+        fake_auth,
+        rate_limit_register="1/minute",
+        client_ip_header_secret=SecretStr(CLIENT_SECRET),
+    )
+    trusted = {"X-DIP-Client-Secret": CLIENT_SECRET}
+    statuses = _register_twice(
+        app,
+        [
+            {**trusted, "X-DIP-Client-IP": "198.51.100.1"},
+            {**trusted, "X-DIP-Client-IP": "198.51.100.2"},
+            {**trusted, "X-DIP-Client-IP": "198.51.100.1"},
+        ],
+    )
+    assert statuses == [409, 409, 429]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"X-DIP-Client-IP": "198.51.100.9"},
+        {"X-DIP-Client-Secret": "wrong" * 8, "X-DIP-Client-IP": "198.51.100.9"},
+        {"X-DIP-Client-Secret": CLIENT_SECRET, "X-DIP-Client-IP": "not-an-ip"},
+    ],
+)
+def test_untrusted_client_ip_headers_are_ignored(
+    fake_auth: _FakeAuth, headers: dict[str, str]
+) -> None:
+    app = _limited(
+        fake_auth,
+        rate_limit_register="1/minute",
+        client_ip_header_secret=SecretStr(CLIENT_SECRET),
+    )
+    assert _register_twice(app, [{}, headers]) == [409, 429]
+
+
+def test_client_ip_header_is_ignored_without_a_secret(fake_auth: _FakeAuth) -> None:
+    app = _limited(fake_auth, rate_limit_register="1/minute")
+    headers = {"X-DIP-Client-Secret": "", "X-DIP-Client-IP": "198.51.100.3"}
+    assert _register_twice(app, [{}, headers]) == [409, 429]
+
+
+def test_short_client_ip_secret_is_rejected() -> None:
+    with pytest.raises(SettingsError, match="CLIENT_IP_HEADER_SECRET"):
+        load_settings(
+            _env_file=None, app_env="test", jwt_secret_key="k" * 40, client_ip_header_secret="x"
+        )
+
+
+def test_public_demo_defaults_are_conservative() -> None:
+    # Class defaults (a local .env may override them).
+    defaults = {name: field.default for name, field in Settings.model_fields.items()}
+    assert defaults["rate_limit_demo"] == "3/day"
+    assert defaults["rate_limit_ask"] == "10/minute"
+    assert defaults["rate_limit_ask_daily"] == "200/day"
+    assert defaults["rate_limit_upload_daily"] == "100/day"
+    assert defaults["demo_max_questions"] == 3
+    assert defaults["demo_max_uploads"] == 1
+    assert defaults["demo_max_upload_bytes"] == 5 * 1024 * 1024
+
+
 def test_rate_limits_disabled_means_no_429(fake_auth: _FakeAuth) -> None:
     app = _app(fake_auth, rate_limit_enabled=False, rate_limit_register="1/minute")
     body = {"email": "new@example.com", "password": "a-long-enough-password"}
@@ -217,6 +310,7 @@ def _redis_down(fake_auth: _FakeAuth) -> FastAPI:
             {"json": {"email": "a@example.com", "password": "a-long-enough-password"}},
             "register",
         ),
+        ("/auth/demo", {}, "demo"),
     ],
 )
 def test_credential_endpoints_fail_closed_when_rate_limiter_is_down(

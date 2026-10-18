@@ -7,13 +7,14 @@ from typing import Any
 from celery import Celery
 from celery.signals import setup_logging, worker_process_shutdown, worker_ready
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.storage.factory import check_storage_backend
 
 logger = logging.getLogger(__name__)
 
 RECONCILE_STALE_JOBS_TASK = "jobs.reconcile_stale"
+CLEANUP_DEMO_USERS_TASK = "users.cleanup_expired_demos"
 
 
 def create_celery_app() -> Celery:
@@ -47,16 +48,27 @@ def create_celery_app() -> Celery:
         redis_socket_timeout=5,
         worker_hijack_root_logger=False,
     )
-    if settings.stale_job_check_interval_seconds > 0:
-        # Executed by the embedded beat of the compose worker (`celery worker -B`).
-        app.conf.beat_schedule = {
-            "reconcile-stale-jobs": {
-                "task": RECONCILE_STALE_JOBS_TASK,
-                "schedule": float(settings.stale_job_check_interval_seconds),
-                "options": {"expires": float(settings.stale_job_check_interval_seconds)},
-            }
-        }
+    app.conf.beat_schedule = beat_schedule(settings)
     return app
+
+
+def beat_schedule(settings: Settings) -> dict[str, dict[str, Any]]:
+    """Periodic tasks (run by the embedded beat locally, the beat service in production)."""
+    schedule: dict[str, dict[str, Any]] = {}
+    if settings.stale_job_check_interval_seconds > 0:
+        schedule["reconcile-stale-jobs"] = {
+            "task": RECONCILE_STALE_JOBS_TASK,
+            "schedule": float(settings.stale_job_check_interval_seconds),
+            "options": {"expires": float(settings.stale_job_check_interval_seconds)},
+        }
+    if settings.demo_cleanup_interval_seconds > 0:
+        # Runs even with DEMO_ENABLED=false so demo accounts created earlier still expire.
+        schedule["cleanup-expired-demo-users"] = {
+            "task": CLEANUP_DEMO_USERS_TASK,
+            "schedule": float(settings.demo_cleanup_interval_seconds),
+            "options": {"expires": float(settings.demo_cleanup_interval_seconds)},
+        }
+    return schedule
 
 
 @setup_logging.connect

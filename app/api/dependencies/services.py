@@ -12,6 +12,7 @@ from app.processing.chunking import ApproximateTokenCounter, TokenCounter
 from app.services.answer_service import AnswerService
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService
+from app.services.demo_service import DemoService
 from app.services.document_service import DocumentService
 from app.services.search_service import SearchService
 from app.services.task_dispatcher import DocumentTaskDispatcher
@@ -43,6 +44,10 @@ def get_document_service(
     return DocumentService(session, storage, dispatcher, settings)
 
 
+def get_demo_service(session: DbSession, hasher: Hasher, settings: AppSettings) -> DemoService:
+    return DemoService(session, hasher, settings)
+
+
 def get_audit_service(session: DbSession) -> AuditService:
     return AuditService(session)
 
@@ -54,6 +59,7 @@ def get_user_service(session: DbSession) -> UserService:
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 AuditServiceDep = Annotated[AuditService, Depends(get_audit_service)]
+DemoServiceDep = Annotated[DemoService, Depends(get_demo_service)]
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 
 

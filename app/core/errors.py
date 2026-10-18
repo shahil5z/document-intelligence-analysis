@@ -7,7 +7,7 @@ Every error response has the shape::
 
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -107,6 +107,22 @@ class RateLimitedError(AppError):
         super().__init__(headers={"Retry-After": str(max(1, retry_after_seconds))})
 
 
+DemoLimit = Literal["questions", "uploads", "file_size", "file_type", "disabled", "expired"]
+
+
+class DemoLimitReachedError(AppError):
+    """A demo account hit one of its limits; the client offers a free account instead."""
+
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "demo_limit_reached"
+    message = "Demo limit reached. Create a free account to continue."
+
+    def __init__(self, limit: DemoLimit, message: str | None = None) -> None:
+        super().__init__(message)
+        self.limit = limit
+        self.details: list[dict[str, Any]] = [{"limit": limit}]
+
+
 class ServiceUnavailableError(AppError):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     code = "service_unavailable"
@@ -142,7 +158,8 @@ def _response(
 
 async def _handle_app_error(_: Request, exc: Exception) -> JSONResponse:
     exc = cast(AppError, exc)
-    return _response(exc.status_code, exc.code, exc.message, headers=exc.headers)
+    details: Sequence[dict[str, Any]] | None = getattr(exc, "details", None)
+    return _response(exc.status_code, exc.code, exc.message, details, headers=exc.headers)
 
 
 async def _handle_http_exception(_: Request, exc: Exception) -> JSONResponse:

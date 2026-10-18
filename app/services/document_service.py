@@ -14,7 +14,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.errors import AppError, ConflictError, NotFoundError, ServiceUnavailableError
+from app.core.errors import (
+    AppError,
+    ConflictError,
+    DemoLimitReachedError,
+    NotFoundError,
+    PayloadTooLargeError,
+    ServiceUnavailableError,
+)
 from app.core.metrics import UPLOADS
 from app.core.request_context import set_document_id
 from app.db.models import Document, DocumentProcessingJob, User
@@ -24,6 +31,7 @@ from app.db.repositories.jobs import ProcessingJobRepository
 from app.domain.enums import AuditAction, DocumentStatus, JobStatus, ResourceType
 from app.domain.state_machine import transition_document, transition_job
 from app.services.audit_service import AuditService
+from app.services.demo_service import release_demo_upload, reserve_demo_upload
 from app.services.task_dispatcher import DocumentTaskDispatcher
 from app.services.upload_validation import (
     StreamDigest,
@@ -97,6 +105,39 @@ class DocumentService:
             allowed_extensions=self._settings.allowed_extensions,
             allowed_content_types=self._settings.allowed_content_types,
         )
+        if not owner.is_demo:
+            return self._store_and_persist(
+                owner, incoming, original_filename, content_type, extension
+            )
+        if extension not in self._settings.demo_allowed_extensions:
+            allowed = ", ".join(self._settings.demo_allowed_extensions).upper()
+            raise DemoLimitReachedError("file_type", f"The demo accepts {allowed} files only.")
+        reserve_demo_upload(self._session, owner, self._settings)
+        try:
+            return self._store_and_persist(
+                owner, incoming, original_filename, content_type, extension
+            )
+        except PayloadTooLargeError as exc:
+            release_demo_upload(self._session, owner)
+            limit_mb = self._settings.demo_max_upload_bytes / (1024 * 1024)
+            raise DemoLimitReachedError(
+                "file_size", f"Demo uploads are limited to {limit_mb:g} MB."
+            ) from exc
+        except BaseException:
+            release_demo_upload(self._session, owner)
+            raise
+
+    def _store_and_persist(
+        self,
+        owner: User,
+        incoming: IncomingFile,
+        original_filename: str,
+        content_type: str,
+        extension: str,
+    ) -> UploadResult:
+        max_size = self._settings.max_upload_size_bytes
+        if owner.is_demo:
+            max_size = min(max_size, self._settings.demo_max_upload_bytes)
 
         document_id = uuid.uuid4()
         generated_filename = f"{document_id.hex}.{extension}"
@@ -108,7 +149,7 @@ class DocumentService:
                 validated_chunks(
                     incoming.stream,
                     extension=extension,
-                    max_size=self._settings.max_upload_size_bytes,
+                    max_size=max_size,
                     chunk_size=self._settings.upload_chunk_size_bytes,
                     digest=digest,
                 ),

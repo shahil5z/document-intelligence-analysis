@@ -133,7 +133,7 @@ def test_reconciler_is_scheduled_on_beat_and_registered() -> None:
 def test_reconciler_schedule_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     disabled = get_settings().model_copy(update={"stale_job_check_interval_seconds": 0})
     monkeypatch.setattr("app.workers.celery_app.get_settings", lambda: disabled)
-    assert not create_celery_app().conf.beat_schedule
+    assert "reconcile-stale-jobs" not in create_celery_app().conf.beat_schedule
 
 
 def test_max_claim_attempts() -> None:

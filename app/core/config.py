@@ -55,7 +55,7 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    app_name: str = "Document Intelligence Platform"
+    app_name: str = "Document Intelligence & Analysis"
     app_env: Environment = Environment.DEVELOPMENT
     debug: bool = False
     log_level: str = "INFO"
@@ -187,15 +187,40 @@ class Settings(BaseSettings):
     security_headers_enabled: bool = True
 
     rate_limit_enabled: bool = True
+    # Shared secret that lets a trusted server-side caller (the Next.js BFF) name the real
+    # client IP in X-DIP-Client-IP (with X-DIP-Client-Secret). Without it every request
+    # proxied by the BFF shares the BFF's egress IP for per-IP limits (register, login,
+    # demo). Empty = header ignored. Set the same value as DIP_CLIENT_IP_SECRET on the BFF.
+    client_ip_header_secret: SecretStr | None = None
     # "redis": shared counters (required in production). "memory": per process (dev/tests).
     rate_limit_backend: Literal["redis", "memory"] = "redis"
+    # Defaults suit a small public demo (docs/security.md#rate-limits). Keys: client IP
+    # for anonymous endpoints, user id for authenticated ones, "global" for demo_global.
     rate_limit_register: str = "5/minute"
+    rate_limit_register_daily: str = "20/day"
     rate_limit_login: str = "10/minute"
     rate_limit_login_per_email: str = "5/minute"
-    rate_limit_upload: str = "30/minute"
+    rate_limit_upload: str = "10/minute"
+    rate_limit_upload_daily: str = "100/day"
+    rate_limit_upload_token: str = "30/minute"  # noqa: S105  (a rate, not a secret)
     rate_limit_search: str = "60/minute"
-    rate_limit_ask: str = "20/minute"
+    rate_limit_ask: str = "10/minute"
+    rate_limit_ask_daily: str = "200/day"
     rate_limit_reprocess: str = "10/minute"
+    rate_limit_demo: str = "3/day"
+    rate_limit_demo_global: str = "200/day"
+
+    # --- Demo mode (POST /auth/demo; docs/demo-mode.md) ----------------------------------
+    # Ephemeral, isolated demo accounts without a password login. Limits are enforced
+    # server-side with counters on the user row; the account and its files are deleted
+    # DEMO_TTL_HOURS after creation by the beat task "users.cleanup_expired_demos".
+    demo_enabled: bool = True
+    demo_max_questions: int = Field(default=3, ge=0, le=1000)
+    demo_max_uploads: int = Field(default=1, ge=0, le=100)
+    demo_max_upload_bytes: int = Field(default=5 * 1024 * 1024, ge=1024)
+    demo_allowed_extensions: Annotated[list[str], NoDecode] = ["pdf"]
+    demo_ttl_hours: int = Field(default=24, ge=1, le=24 * 30)
+    demo_cleanup_interval_seconds: int = Field(default=900, ge=0)
 
     metrics_enabled: bool = True
     # Worker-side Prometheus exporter port (None = off). Needs PROMETHEUS_MULTIPROC_DIR
@@ -218,6 +243,14 @@ class Settings(BaseSettings):
             return [str(item).lower().lstrip(".") for item in parsed]
         return parsed
 
+    @field_validator("demo_allowed_extensions", mode="before")
+    @classmethod
+    def _parse_demo_extensions(cls, value: object) -> object:
+        parsed = _split_csv(value)
+        if isinstance(parsed, list):
+            return [str(item).lower().lstrip(".") for item in parsed]
+        return parsed
+
     @field_validator("allowed_content_types", mode="before")
     @classmethod
     def _parse_content_types(cls, value: object) -> object:
@@ -233,12 +266,18 @@ class Settings(BaseSettings):
 
     @field_validator(
         "rate_limit_register",
+        "rate_limit_register_daily",
         "rate_limit_login",
         "rate_limit_login_per_email",
         "rate_limit_upload",
+        "rate_limit_upload_daily",
+        "rate_limit_upload_token",
         "rate_limit_search",
         "rate_limit_ask",
+        "rate_limit_ask_daily",
         "rate_limit_reprocess",
+        "rate_limit_demo",
+        "rate_limit_demo_global",
     )
     @classmethod
     def _validate_rate(cls, value: str) -> str:
@@ -250,6 +289,13 @@ class Settings(BaseSettings):
     def _reject_wildcard_origin(cls, value: list[str]) -> list[str]:
         if "*" in value:
             raise ValueError("CORS_ALLOWED_ORIGINS must list explicit origins; '*' is not allowed")
+        return value
+
+    @field_validator("client_ip_header_secret")
+    @classmethod
+    def _client_ip_secret_strength(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and 0 < len(value.get_secret_value()) < 24:
+            raise ValueError("CLIENT_IP_HEADER_SECRET must be empty or at least 24 characters")
         return value
 
     @field_validator("jwt_algorithm")

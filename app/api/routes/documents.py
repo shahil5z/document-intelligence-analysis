@@ -34,8 +34,8 @@ router = APIRouter(prefix="/documents", tags=["documents"])
         "Uploading identical content twice returns 409. Accepts an access token or an "
         "upload-only token from `POST /auth/upload-token`."
     ),
-    responses=error_responses(400, 401, 409, 413, 415, 422, 429),
-    dependencies=[Depends(limit_by_upload_user("upload"))],
+    responses=error_responses(400, 401, 403, 409, 413, 415, 422, 429),
+    dependencies=[Depends(limit_by_upload_user("upload", "upload_daily"))],
 )
 def upload_document(
     user: UploadUser,

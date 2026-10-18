@@ -36,6 +36,8 @@ class AuditAction(StrEnum):
     USER_REGISTERED = "user.registered"
     USER_LOGIN = "user.login"
     USER_LOGIN_FAILED = "user.login_failed"
+    DEMO_CREATED = "user.demo_created"
+    DEMO_CONVERTED = "user.demo_converted"
     DOCUMENT_UPLOADED = "document.uploaded"
     DOCUMENT_DELETED = "document.deleted"
     DOCUMENT_REPROCESS_REQUESTED = "document.reprocess_requested"

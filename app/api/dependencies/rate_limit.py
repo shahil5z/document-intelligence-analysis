@@ -1,13 +1,13 @@
 """Rate-limit dependencies.
 
-* ``limit_by_ip(scope)``: anonymous endpoints (register, login). The client address is
+* ``limit_by_ip(*scopes)``: anonymous endpoints (register, login). The client address is
   ``request.client.host``; behind a proxy run uvicorn with ``--proxy-headers`` and a
   correct ``--forwarded-allow-ips`` so this is the real client, not the proxy.
-* ``limit_by_user(scope)``: authenticated endpoints, keyed by user id (runs after auth,
+* ``limit_by_user(*scopes)``: authenticated endpoints, keyed by user id (runs after auth,
   which FastAPI caches per request, so the user is loaded once).
 * ``enforce_rate_limit``: for keys only known inside the route (login per e-mail).
 
-Redis outage policy (``FAIL_CLOSED_SCOPES``): register/login reject with 503 so a broken
+Redis outage policy (``FAIL_CLOSED_SCOPES``): register/login/demo reject with 503 so a broken
 limiter never means unlimited password guessing; all other scopes are allowed with a
 warning log and ``dip_rate_limiter_errors_total{decision="fail_open"}``.
 
@@ -15,6 +15,8 @@ The limiter lives on ``app.state.rate_limiter`` (``None`` when disabled); rates 
 ``app.state.settings`` so each app instance (and each test) is isolated.
 """
 
+import hmac
+import ipaddress
 import logging
 from collections.abc import Callable
 from typing import Literal
@@ -29,10 +31,29 @@ from app.core.rate_limit import RateLimiter, RateLimiterUnavailableError, parse_
 
 logger = logging.getLogger(__name__)
 
-RateScope = Literal["register", "login", "login_per_email", "upload", "search", "ask", "reprocess"]
+RateScope = Literal[
+    "register",
+    "register_daily",
+    "login",
+    "login_per_email",
+    "upload",
+    "upload_daily",
+    "upload_token",
+    "search",
+    "ask",
+    "ask_daily",
+    "reprocess",
+    "demo",
+    "demo_global",
+]
 
-# Scopes that protect credentials: without a working limiter they are refused (503).
-FAIL_CLOSED_SCOPES: frozenset[RateScope] = frozenset({"register", "login", "login_per_email"})
+# Scopes that protect credentials or create accounts: without a working limiter they
+# are refused (503). Demo accounts cost LLM tokens, so they fail closed too.
+FAIL_CLOSED_SCOPES: frozenset[RateScope] = frozenset(
+    {"register", "register_daily", "login", "login_per_email", "demo", "demo_global"}
+)
+# Identifier for limits shared by all clients (demo_global).
+GLOBAL_IDENTIFIER = "global"
 LIMITER_UNAVAILABLE_MESSAGE = "Sign-in and registration are temporarily unavailable; retry later"
 _FAIL_CLOSED_RETRY_AFTER_SECONDS = 5
 
@@ -68,28 +89,56 @@ def enforce_rate_limit(request: Request, scope: RateScope, identifier: str) -> N
         raise RateLimitedError(decision.retry_after_seconds)
 
 
+CLIENT_IP_HEADER = "x-dip-client-ip"
+CLIENT_IP_SECRET_HEADER = "x-dip-client-secret"  # noqa: S105  (a header name)
+
+
 def client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    """The client address used for per-IP limits.
+
+    A request that carries the configured ``CLIENT_IP_HEADER_SECRET`` may name the real
+    client in ``X-DIP-Client-IP`` (the BFF does, because to the API every browser request
+    comes from the BFF's server). Anyone else's header is ignored, so it cannot be used to
+    dodge limits.
+    """
+    peer = request.client.host if request.client else "unknown"
+    settings: Settings = request.app.state.settings
+    secret = settings.client_ip_header_secret
+    if secret is None or not secret.get_secret_value():
+        return peer
+    presented = request.headers.get(CLIENT_IP_SECRET_HEADER, "")
+    if not hmac.compare_digest(presented.encode(), secret.get_secret_value().encode()):
+        return peer
+    claimed = request.headers.get(CLIENT_IP_HEADER, "").strip()
+    try:
+        return str(ipaddress.ip_address(claimed))
+    except ValueError:
+        return peer
 
 
-def limit_by_ip(scope: RateScope) -> Callable[[Request], None]:
+def limit_by_ip(*scopes: RateScope) -> Callable[[Request], None]:
+    """Every scope is checked in order (e.g. a per-minute and a per-day window)."""
+
     def dependency(request: Request) -> None:
-        enforce_rate_limit(request, scope, client_ip(request))
+        for scope in scopes:
+            enforce_rate_limit(request, scope, client_ip(request))
 
     return dependency
 
 
-def limit_by_user(scope: RateScope) -> Callable[..., None]:
+def limit_by_user(*scopes: RateScope) -> Callable[..., None]:
     def dependency(request: Request, user: CurrentUser) -> None:
-        enforce_rate_limit(request, scope, str(user.id))
+        for scope in scopes:
+            enforce_rate_limit(request, scope, str(user.id))
 
     return dependency
 
 
-def limit_by_upload_user(scope: RateScope) -> Callable[..., None]:
+def limit_by_upload_user(*scopes: RateScope) -> Callable[..., None]:
     """Like ``limit_by_user`` but also accepts the upload-only token."""
 
     def dependency(request: Request, user: UploadUser) -> None:
-        enforce_rate_limit(request, scope, str(user.id))
+        for scope in scopes:
+            enforce_rate_limit(request, scope, str(user.id))
 
     return dependency
