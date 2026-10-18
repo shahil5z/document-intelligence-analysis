@@ -92,7 +92,7 @@ if [[ "$DO_FIREWALL" -eq 1 ]]; then
   if [[ -f /etc/iptables/rules.v4 ]] && grep -q 'REJECT' /etc/iptables/rules.v4; then
     log "Oracle-style iptables rules found; allowing 80 and 443 before the REJECT rule"
     for port in 80 443; do
-      if ! iptables -C INPUT -p tcp -m state --state NEW -m tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+      if ! iptables -C INPUT -p tcp -m state --state NEW -m tcp --dport "$port" -j ACCEPT >/dev/null 2>&1; then
         line="$(iptables -L INPUT --line-numbers -n | awk '$2 == "REJECT" {print $1; exit}')"
         iptables -I INPUT "${line:-1}" -p tcp -m state --state NEW -m tcp --dport "$port" -j ACCEPT
       fi
@@ -110,7 +110,7 @@ if [[ "$DO_FIREWALL" -eq 1 ]]; then
     ufw allow 443/tcp >/dev/null
     ufw --force enable >/dev/null
   fi
-  log "note: ports published by Docker bypass ufw; only Caddy publishes ports (80/443)"
+  log "note: Docker-published ports use Docker's own iptables chains (they bypass ufw); only Caddy publishes ports (80/443)"
 fi
 
 if [[ "$DO_SWAP" -eq 1 ]]; then
