@@ -3,10 +3,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 
-from app.api.dependencies.auth import CurrentUser
+from app.api.dependencies.auth import CurrentUser, UploadUser
 from app.api.dependencies.pagination import Pagination
-from app.api.dependencies.rate_limit import limit_by_user
+from app.api.dependencies.rate_limit import limit_by_upload_user, limit_by_user
 from app.api.dependencies.services import DocumentServiceDep
+from app.api.dependencies.settings import AppSettings
 from app.api.responses import error_responses
 from app.schemas.common import Page
 from app.schemas.document import (
@@ -14,6 +15,7 @@ from app.schemas.document import (
     DocumentStatusResponse,
     DocumentUploadResponse,
     ProcessingJobRead,
+    UploadPolicy,
 )
 from app.services.document_service import IncomingFile
 
@@ -29,13 +31,14 @@ router = APIRouter(prefix="/documents", tags=["documents"])
         "Multipart upload of a single PDF, DOCX or TXT file (allow-list from configuration). "
         "The extension, declared content type and leading magic bytes are checked, the size "
         "limit is enforced while streaming to storage, and a processing job is queued. "
-        "Uploading identical content twice returns 409."
+        "Uploading identical content twice returns 409. Accepts an access token or an "
+        "upload-only token from `POST /auth/upload-token`."
     ),
     responses=error_responses(400, 401, 409, 413, 415, 422, 429),
-    dependencies=[Depends(limit_by_user("upload"))],
+    dependencies=[Depends(limit_by_upload_user("upload"))],
 )
 def upload_document(
-    user: CurrentUser,
+    user: UploadUser,
     documents: DocumentServiceDep,
     file: Annotated[UploadFile, File(description="The document to upload.")],
 ) -> DocumentUploadResponse:
@@ -50,6 +53,21 @@ def upload_document(
         status=result.document.status,
         job_id=result.job.id,
         job_status=result.job.status,
+    )
+
+
+@router.get(
+    "/upload-policy",
+    response_model=UploadPolicy,
+    summary="Upload limits",
+    description="Size limit and allow-lists that POST /documents enforces, for client-side checks.",
+    responses=error_responses(401),
+)
+def upload_policy(_user: CurrentUser, settings: AppSettings) -> UploadPolicy:
+    return UploadPolicy(
+        max_upload_size_bytes=settings.max_upload_size_bytes,
+        allowed_extensions=list(settings.allowed_extensions),
+        allowed_content_types=list(settings.allowed_content_types),
     )
 
 

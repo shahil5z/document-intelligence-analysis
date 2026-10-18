@@ -21,7 +21,7 @@ from typing import Literal
 
 from fastapi import Request
 
-from app.api.dependencies.auth import CurrentUser
+from app.api.dependencies.auth import CurrentUser, UploadUser
 from app.core.config import Settings
 from app.core.errors import RateLimitedError, ServiceUnavailableError
 from app.core.metrics import RATE_LIMITED, RATE_LIMITER_ERRORS
@@ -81,6 +81,15 @@ def limit_by_ip(scope: RateScope) -> Callable[[Request], None]:
 
 def limit_by_user(scope: RateScope) -> Callable[..., None]:
     def dependency(request: Request, user: CurrentUser) -> None:
+        enforce_rate_limit(request, scope, str(user.id))
+
+    return dependency
+
+
+def limit_by_upload_user(scope: RateScope) -> Callable[..., None]:
+    """Like ``limit_by_user`` but also accepts the upload-only token."""
+
+    def dependency(request: Request, user: UploadUser) -> None:
         enforce_rate_limit(request, scope, str(user.id))
 
     return dependency

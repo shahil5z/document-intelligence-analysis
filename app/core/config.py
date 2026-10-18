@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_issuer: str = "document-intelligence-platform"
     jwt_access_token_expire_minutes: int = Field(default=30, ge=1, le=24 * 60)
+    # Lifetime of the upload-only token from POST /auth/upload-token.
+    upload_token_expire_seconds: int = Field(default=300, ge=30, le=3600)
 
     storage_backend: str = "local"
     storage_path: Path = Path("./storage_data")

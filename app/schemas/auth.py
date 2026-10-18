@@ -26,6 +26,12 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
 
 
+class UploadTokenResponse(BaseModel):
+    upload_token: str = Field(description="Bearer token accepted only by POST /documents.")
+    token_type: str = "bearer"  # noqa: S105  (OAuth2 token type, not a secret)
+    expires_in: int = Field(description="Token lifetime in seconds.", examples=[300])
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"  # noqa: S105  (OAuth2 token type, not a secret)

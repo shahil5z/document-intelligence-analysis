@@ -53,3 +53,9 @@ class DocumentStatusResponse(BaseModel):
     status: DocumentStatus
     job: ProcessingJobRead | None
     chunk_count: int = Field(default=0, description="Indexed chunks (searchable when completed).")
+
+
+class UploadPolicy(BaseModel):
+    max_upload_size_bytes: int
+    allowed_extensions: list[str] = Field(examples=[["pdf", "docx", "txt"]])
+    allowed_content_types: list[str]

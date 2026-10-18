@@ -6,8 +6,10 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app.api.dependencies.auth import CurrentUser
 from app.api.dependencies.rate_limit import enforce_rate_limit, limit_by_ip
 from app.api.dependencies.services import AuthServiceDep
+from app.api.dependencies.settings import AppSettings
 from app.api.responses import error_responses
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.core.security import create_upload_token
+from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UploadTokenResponse
 from app.schemas.user import UserRead
 from app.services.auth_service import normalize_email
 
@@ -71,3 +73,21 @@ def token(
 )
 def me(user: CurrentUser) -> UserRead:
     return UserRead.model_validate(user)
+
+
+@router.post(
+    "/upload-token",
+    response_model=UploadTokenResponse,
+    summary="Issue a short-lived upload-only token",
+    description=(
+        "Returns a bearer token (default lifetime 5 minutes, `UPLOAD_TOKEN_EXPIRE_SECONDS`) "
+        "that is accepted only by `POST /documents`. A browser frontend whose session lives "
+        "in a server-side proxy uses it to upload files directly to the API, so large "
+        "uploads do not pass through the proxy. Requires a normal access token; an upload "
+        "token cannot mint another one."
+    ),
+    responses=error_responses(401, 403),
+)
+def upload_token(user: CurrentUser, settings: AppSettings) -> UploadTokenResponse:
+    token, expires_in = create_upload_token(user_id=user.id, role=user.role, settings=settings)
+    return UploadTokenResponse(upload_token=token, expires_in=expires_in)

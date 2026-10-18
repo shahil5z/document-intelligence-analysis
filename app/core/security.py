@@ -12,6 +12,9 @@ from app.core.config import Settings
 from app.domain.enums import UserRole
 
 ACCESS_TOKEN_TYPE = "access"  # noqa: S105  (JWT "type" claim, not a secret)
+# Short-lived token accepted only by POST /documents, so a browser can upload directly
+# to the API (bypassing a size-limited frontend proxy) without holding the session token.
+UPLOAD_TOKEN_TYPE = "upload"  # noqa: S105  (JWT "type" claim, not a secret)
 
 
 class PasswordHasher:
@@ -46,15 +49,22 @@ class InvalidTokenError(Exception):
 
 
 def create_access_token(
-    *, user_id: uuid.UUID, role: UserRole, settings: Settings, now: datetime | None = None
+    *,
+    user_id: uuid.UUID,
+    role: UserRole,
+    settings: Settings,
+    now: datetime | None = None,
+    token_type: str = ACCESS_TOKEN_TYPE,
+    lifetime: timedelta | None = None,
 ) -> tuple[str, int]:
     """Return ``(encoded_token, expires_in_seconds)``."""
     issued_at = now or datetime.now(UTC)
-    lifetime = timedelta(minutes=settings.jwt_access_token_expire_minutes)
+    if lifetime is None:
+        lifetime = timedelta(minutes=settings.jwt_access_token_expire_minutes)
     claims = {
         "sub": str(user_id),
         "role": role.value,
-        "type": ACCESS_TOKEN_TYPE,
+        "type": token_type,
         "jti": uuid.uuid4().hex,
         "iss": settings.jwt_issuer,
         "iat": issued_at,
@@ -66,7 +76,26 @@ def create_access_token(
     return token, int(lifetime.total_seconds())
 
 
-def decode_access_token(token: str, settings: Settings) -> TokenPayload:
+def create_upload_token(
+    *, user_id: uuid.UUID, role: UserRole, settings: Settings, now: datetime | None = None
+) -> tuple[str, int]:
+    """Short-lived token that only ``POST /documents`` accepts."""
+    return create_access_token(
+        user_id=user_id,
+        role=role,
+        settings=settings,
+        now=now,
+        token_type=UPLOAD_TOKEN_TYPE,
+        lifetime=timedelta(seconds=settings.upload_token_expire_seconds),
+    )
+
+
+def decode_access_token(
+    token: str,
+    settings: Settings,
+    *,
+    allowed_types: frozenset[str] = frozenset({ACCESS_TOKEN_TYPE}),
+) -> TokenPayload:
     try:
         claims = jwt.decode(
             token,
@@ -75,7 +104,7 @@ def decode_access_token(token: str, settings: Settings) -> TokenPayload:
             issuer=settings.jwt_issuer,
             options={"require": ["sub", "role", "type", "jti", "iat", "exp", "iss"]},
         )
-        if claims["type"] != ACCESS_TOKEN_TYPE:
+        if claims["type"] not in allowed_types:
             raise InvalidTokenError("unexpected token type")
         return TokenPayload(
             subject=uuid.UUID(str(claims["sub"])),
