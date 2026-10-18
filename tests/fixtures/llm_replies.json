@@ -1,0 +1,206 @@
+{
+  "description": "Hand-written replicas of OpenAI chat.completion replies in the formats gpt-4o-mini produces (structured JSON, fenced JSON, plain Markdown with various citation markers, refusals). They were NOT captured from the OpenAI API (no key was available); they reproduce the envelope fields and content styles so the parser and AnswerService can be tested against them. Each case is answered against 3 sources.",
+  "cases": [
+    {
+      "name": "structured_answered",
+      "note": "strict json_schema reply (response_format accepted)",
+      "content": "{\"status\": \"answered\", \"answer\": \"Customers can return unused items **within 30 days of delivery** [1]. Refunds go back to the original payment method within 5-7 business days [2].\", \"citations\": [1, 2], \"missing_information\": \"\"}",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1,
+          2
+        ],
+        "partial": false,
+        "contains": "within 30 days of delivery"
+      }
+    },
+    {
+      "name": "structured_partial",
+      "note": "partial answer: supported part + what is missing",
+      "content": "{\"status\": \"partial\", \"answer\": \"The policy allows returns within 30 days of delivery [1]. It does not say whether shipping costs are refunded.\", \"citations\": [1], \"missing_information\": \"Whether return shipping is refunded.\"}",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1
+        ],
+        "partial": true,
+        "missing": "Whether return shipping is refunded."
+      }
+    },
+    {
+      "name": "structured_insufficient",
+      "note": "model says nothing is relevant",
+      "content": "{\"status\": \"insufficient\", \"answer\": \"The provided sources do not mention warranty coverage.\", \"citations\": [], \"missing_information\": \"Warranty terms.\"}",
+      "expect": {
+        "insufficient": true,
+        "reason": "model_declined"
+      }
+    },
+    {
+      "name": "fenced_json",
+      "note": "JSON in a ```json fence (common without structured outputs)",
+      "content": "```json\n{\n  \"status\": \"answered\",\n  \"answer\": \"Damaged items must be reported within 48 hours [3].\",\n  \"citations\": [3],\n  \"missing_information\": \"\"\n}\n```",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          3
+        ]
+      }
+    },
+    {
+      "name": "prose_then_json",
+      "note": "short preface before the JSON object",
+      "content": "Here is the answer based on the sources:\n{\"status\": \"answered\", \"answer\": \"Refunds are issued to the original payment method [2].\", \"citations\": [2], \"missing_information\": \"\"}",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          2
+        ]
+      }
+    },
+    {
+      "name": "plain_numeric_markers",
+      "note": "plain Markdown with [n] and grouped [1, 3]",
+      "content": "You have **30 days** from delivery to return an item [1].\n\n- Report damage within 48 hours [1, 3].\n- Refunds take 5-7 business days [2].",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1,
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "name": "legacy_s_markers",
+      "note": "old [S1] style",
+      "content": "Returns are accepted within 30 days of delivery [S1][S2].",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "source_word_markers",
+      "note": "[Source 1] and (Source 3)",
+      "content": "Returns are accepted within 30 days [Source 1]. Damage must be reported within 48 hours (Source 3).",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1,
+          3
+        ]
+      }
+    },
+    {
+      "name": "fullwidth_markers",
+      "note": "【1】 brackets",
+      "content": "Returns are accepted within 30 days of delivery【1】.",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "json_alternate_fields",
+      "note": "alternate field names and string citations",
+      "content": "{\"outcome\": \"answered\", \"response\": \"Refunds take 5-7 business days [2].\", \"sources\": [\"[2]\", \"S1\"]}",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          2
+        ]
+      }
+    },
+    {
+      "name": "forged_and_valid",
+      "note": "one valid citation survives, forged ones dropped",
+      "content": "{\"status\": \"answered\", \"answer\": \"Returns within 30 days [1]. Lifetime refunds apply [7]. See also [12].\", \"citations\": [1, 7, 12], \"missing_information\": \"\"}",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1
+        ],
+        "warnings": [
+          "invalid_citations_removed"
+        ]
+      }
+    },
+    {
+      "name": "only_forged_citations",
+      "note": "no valid citation left -> ungrounded",
+      "content": "{\"status\": \"answered\", \"answer\": \"Refunds are unlimited [9].\", \"citations\": [9], \"missing_information\": \"\"}",
+      "expect": {
+        "insufficient": true,
+        "reason": "no_valid_citations"
+      }
+    },
+    {
+      "name": "uncited_text",
+      "note": "answer text without any marker",
+      "content": "Customers can return items within 30 days.",
+      "expect": {
+        "insufficient": true,
+        "reason": "no_valid_citations"
+      }
+    },
+    {
+      "name": "sentinel_reply",
+      "note": "what the previous prompt asked for when evidence felt incomplete; matches the reported log (retrieved 5, llm_called true)",
+      "content": "INSUFFICIENT_EVIDENCE",
+      "expect": {
+        "insufficient": true,
+        "reason": "model_declined"
+      }
+    },
+    {
+      "name": "sentinel_then_partial",
+      "note": "sentinel followed by a cited partial answer",
+      "content": "INSUFFICIENT_EVIDENCE: the sources only say returns are accepted within 30 days [1].",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1
+        ],
+        "partial": true
+      }
+    },
+    {
+      "name": "refusal_null_content",
+      "note": "structured-output safety refusal: content null, refusal set",
+      "content": null,
+      "refusal": "I'm sorry, I can't help with that.",
+      "expect": {
+        "insufficient": true,
+        "reason": "parse_failed"
+      }
+    },
+    {
+      "name": "empty_content",
+      "note": "empty string",
+      "content": "",
+      "expect": {
+        "insufficient": true,
+        "reason": "parse_failed"
+      }
+    },
+    {
+      "name": "year_in_brackets",
+      "note": "a bracketed year is text, not a citation",
+      "content": "The policy was last revised in [2024] and allows returns within 30 days [1].",
+      "expect": {
+        "insufficient": false,
+        "citations": [
+          1
+        ],
+        "contains": "[2024]"
+      }
+    }
+  ]
+}

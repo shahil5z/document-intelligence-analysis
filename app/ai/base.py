@@ -1,5 +1,5 @@
-from collections.abc import Sequence
-from typing import Literal, Protocol, TypedDict
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, Protocol, TypedDict
 
 
 class ChatMessage(TypedDict):
@@ -8,12 +8,18 @@ class ChatMessage(TypedDict):
 
 
 class LLMProvider(Protocol):
-    """Generates text from a list of chat messages."""
+    """Generates text from a list of chat messages.
+
+    ``json_schema``: ask for a reply matching this JSON schema (OpenAI structured outputs)
+    where the backend supports it; implementations may ignore it.
+    """
 
     @property
     def model_name(self) -> str: ...
 
-    def complete(self, messages: Sequence[ChatMessage]) -> str: ...
+    def complete(
+        self, messages: Sequence[ChatMessage], *, json_schema: Mapping[str, Any] | None = None
+    ) -> str: ...
 
 
 class EmbeddingProvider(Protocol):

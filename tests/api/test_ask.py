@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.dependencies.services import get_llm
+from app.prompt import PROMPT_VERSION
 from app.services.answer_service import INSUFFICIENT_EVIDENCE_ANSWER
 from app.storage.local import LocalStorage
 from tests.conftest import RecordingDispatcher, upload_and_index
@@ -48,14 +49,21 @@ def _ask(client: TestClient, headers: dict[str, str], question: str) -> dict[str
 def test_answer_has_citations_from_retrieved_chunks(
     client: TestClient, user_headers: dict[str, str], indexed: uuid.UUID, llm: MockLLM
 ) -> None:
-    llm.response = "You can request a refund within 30 days of delivery [S1]."
+    llm.response = (
+        '{"status": "answered", "answer": "You can request a refund within 30 days of '
+        'delivery [1].", "citations": [1], "missing_information": ""}'
+    )
     body = _ask(client, user_headers, "How many days do I have to request a refund?")
     assert body["insufficient_evidence"] is False
-    assert body["answer"] == llm.response
+    assert body["answer"] == "You can request a refund within 30 days of delivery [1]."
     assert body["model"] == "mock-llm"
     assert body["warnings"] == []
+    assert body["partial"] is False
+    assert body["insufficient_reason"] is None
+    assert body["prompt_version"] == PROMPT_VERSION
     [citation] = body["citations"]
     assert citation["source_id"] == "S1"
+    assert citation["number"] == 1
     assert citation["document_id"] == str(indexed)
     assert citation["filename"] == "refund.txt"
     assert citation["snippet"] == REFUND
@@ -76,13 +84,28 @@ def test_hallucinated_citations_are_removed(
     assert "invalid_citations_removed" in body["warnings"]
 
 
-def test_answer_without_citations_is_flagged(
+def test_answer_without_citations_is_treated_as_ungrounded(
     client: TestClient, user_headers: dict[str, str], indexed: uuid.UUID, llm: MockLLM
 ) -> None:
     llm.response = "Refunds are possible."
     body = _ask(client, user_headers, "refund days")
     assert body["citations"] == []
-    assert "answer_has_no_citations" in body["warnings"]
+    assert body["insufficient_evidence"] is True
+    assert body["insufficient_reason"] == "no_valid_citations"
+
+
+def test_partial_answer_keeps_supported_part(
+    client: TestClient, user_headers: dict[str, str], indexed: uuid.UUID, llm: MockLLM
+) -> None:
+    llm.response = (
+        '```json\n{"status": "partial", "answer": "Refunds within 30 days [1].", '
+        '"citations": [1], "missing_information": "Shipping costs."}\n```'
+    )
+    body = _ask(client, user_headers, "refund days and shipping costs")
+    assert body["insufficient_evidence"] is False
+    assert body["partial"] is True
+    assert body["missing_information"] == "Shipping costs."
+    assert "partial_answer" in body["warnings"]
 
 
 def test_insufficient_evidence_skips_the_llm(
@@ -96,6 +119,10 @@ def test_insufficient_evidence_skips_the_llm(
         "sources_considered": 0,
         "model": None,
         "warnings": [],
+        "partial": False,
+        "missing_information": None,
+        "insufficient_reason": "below_threshold",
+        "prompt_version": PROMPT_VERSION,
     }
     assert llm.calls == []
 

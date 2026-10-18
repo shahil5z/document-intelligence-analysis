@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "answer", "citations", "missing_information"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["answered", "partial", "insufficient"],
+      "description": "answered = fully supported; partial = only part of the question is covered; insufficient = no source is relevant."
+    },
+    "answer": {
+      "type": "string",
+      "description": "Markdown answer. Every factual sentence ends with [n] citations that refer to the numbered sources."
+    },
+    "citations": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "description": "Numbers of the sources cited in the answer."
+    },
+    "missing_information": {
+      "type": "string",
+      "description": "What the sources do not cover; empty string when nothing is missing."
+    }
+  }
+}

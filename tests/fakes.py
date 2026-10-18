@@ -3,8 +3,9 @@
 import hashlib
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.ai.base import ChatMessage
 from app.ai.errors import LLMError
@@ -109,16 +110,20 @@ class HashingEmbeddingProvider:
 class MockLLM:
     """Records prompts; returns ``response`` (``{labels}`` is replaced by the source ids)."""
 
-    response: str = "The answer is supported by the documents [S1]."
+    response: str = "The answer is supported by the documents [1]."
     error: bool = False
     calls: list[list[ChatMessage]] = field(default_factory=list)
+    schemas: list[Mapping[str, Any] | None] = field(default_factory=list)
 
     @property
     def model_name(self) -> str:
         return "mock-llm"
 
-    def complete(self, messages: Sequence[ChatMessage]) -> str:
+    def complete(
+        self, messages: Sequence[ChatMessage], *, json_schema: Mapping[str, Any] | None = None
+    ) -> str:
         self.calls.append(list(messages))
+        self.schemas.append(json_schema)
         if self.error:
             raise LLMError("the language model did not respond in time")
         return self.response

@@ -3,8 +3,8 @@
 Not exercised against the real OpenAI API in DIP1; the unit tests use a fake client.
 """
 
-from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from app.ai.base import ChatMessage
 
@@ -32,7 +32,10 @@ class OpenAIChatProvider:
     def model_name(self) -> str:
         return self._model
 
-    def complete(self, messages: Sequence[ChatMessage]) -> str:
+    def complete(
+        self, messages: Sequence[ChatMessage], *, json_schema: Mapping[str, Any] | None = None
+    ) -> str:
+        del json_schema  # legacy adapter: plain completions only
         payload = [_to_openai_message(message) for message in messages]
         response = self._client.chat.completions.create(model=self._model, messages=payload)
         return response.choices[0].message.content or ""

@@ -99,6 +99,7 @@ def _cached_llm_provider(
     timeout_seconds: float,
     max_output_tokens: int,
     temperature: float,
+    structured_output: bool = True,
 ) -> OpenAICompatibleLLMProvider:
     # One HTTP client (connection pool) per process and configuration, instead of a new,
     # never-closed client per /ask request.
@@ -109,6 +110,7 @@ def _cached_llm_provider(
         timeout_seconds=timeout_seconds,
         max_output_tokens=max_output_tokens,
         temperature=temperature,
+        structured_output=structured_output,
     )
 
 
@@ -128,4 +130,5 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
         timeout_seconds=settings.llm_timeout_seconds,
         max_output_tokens=settings.llm_max_output_tokens,
         temperature=settings.llm_temperature,
+        structured_output=settings.llm_structured_output,
     )

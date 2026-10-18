@@ -17,8 +17,13 @@ storage_data
 tests
 docs
 *.md
+# ...except the prompt files the API loads at runtime (app/prompt/)
+!app/prompt/*.md
 *.zip
 storage
 uploads
 logs
 *.log
+# the Next.js frontend is built and deployed separately (Vercel)
+frontend
+.e2e

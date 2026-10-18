@@ -12,7 +12,7 @@ then deletes and checks the document is no longer searchable.
 "LLM unavailable" (503) are accepted, so the default run never needs a real key; use
 --ask-expect answer|unavailable to be strict. ``--real-llm`` is the explicit opt-in for a
 run against the real provider configured in the API's .env: it implies
-``--ask-expect answer`` and additionally requires inline [S<n>] citations that point at
+``--ask-expect answer`` and additionally requires inline [n] citations that point at
 the uploaded document. It sends two short questions (a few hundred tokens) to the LLM.
 
 Also checked: 401 without a token, an immediate second reprocess (409, or 202 if the
@@ -269,8 +269,8 @@ def main() -> None:  # noqa: PLR0915  (one linear end-to-end scenario)
         cited = {c["document_id"] for c in body["citations"]}
         ok = (not body["insufficient_evidence"]) and cited <= set(documents) and bool(cited)
         if args.real_llm:
-            labels = set(re.findall(r"\[(S\d+)\]", body["answer"]))
-            ok = ok and labels == {c["source_id"] for c in body["citations"]}
+            numbers = {int(n) for n in re.findall(r"\[(\d+)\]", body["answer"])}
+            ok = ok and numbers == {c["number"] for c in body["citations"]}
             ok = ok and documents[0] in cited and "30" in body["answer"]
         check(
             ok and args.ask_expect != "unavailable",

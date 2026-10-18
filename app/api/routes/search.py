@@ -86,6 +86,7 @@ def ask(body: AskRequest, user: CurrentUser, service: AnswerServiceDep) -> AskRe
         insufficient_evidence=result.insufficient_evidence,
         citations=[
             Citation(
+                number=cited.number,
                 source_id=cited.label,
                 chunk_id=cited.source.item.hit.chunk_id,
                 document_id=cited.source.item.hit.document_id,
@@ -102,4 +103,8 @@ def ask(body: AskRequest, user: CurrentUser, service: AnswerServiceDep) -> AskRe
         sources_considered=result.sources_considered,
         model=result.model,
         warnings=result.warnings,
+        partial=result.partial,
+        missing_information=result.missing_information,
+        insufficient_reason=result.insufficient_reason,
+        prompt_version=result.prompt_version,
     )

@@ -21,6 +21,16 @@ OFF_TOPIC = [
     "How do black holes evaporate?",
     "What is the boiling point of mercury?",
 ]
+# Questions about a whole document (what users type into a document assistant). They match
+# no single passage well, so they show how low genuine-but-generic questions score.
+DOCUMENT_LEVEL = [
+    "What is this document about?",
+    "Summarize the document.",
+    "What are the key points?",
+    "List the main rules described here.",
+    "Who is this policy for?",
+    "What are the deadlines mentioned?",
+]
 QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
 
@@ -46,7 +56,8 @@ def main() -> None:
     documents = model.encode(texts, normalize_embeddings=True)
     spec = json.loads((PROJECT_ROOT / "tests/fixtures/eval_queries.json").read_text("utf-8"))
     on_topic = [item["query"] for item in spec["queries"]]
-    for name, group in (("on-topic", on_topic), ("off-topic", OFF_TOPIC)):
+    groups = (("on-topic", on_topic), ("document-level", DOCUMENT_LEVEL), ("off-topic", OFF_TOPIC))
+    for name, group in groups:
         queries = model.encode([QUERY_INSTRUCTION + q for q in group], normalize_embeddings=True)
         top = (queries @ documents.T).max(axis=1)
         print(

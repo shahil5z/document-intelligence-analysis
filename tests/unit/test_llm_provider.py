@@ -82,3 +82,44 @@ def test_factory_requires_key_and_respects_none(monkeypatch: pytest.MonkeyPatch)
         create_llm_provider(_settings(openai_api_key="real-looking", llm_provider="none"))
     provider = create_llm_provider(_settings(openai_api_key="real-looking", llm_model="m"))
     assert provider.model_name == "m"
+
+
+def test_structured_output_is_requested_and_falls_back_once_when_rejected() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        seen.append(body)
+        if "response_format" in body:
+            return httpx2.Response(400, json={"error": {"message": "response_format unsupported"}})
+        return httpx2.Response(200, json={"choices": [{"message": {"content": "plain [1]"}}]})
+
+    provider = _provider(handler)
+    schema = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
+    assert provider.complete([{"role": "user", "content": "q"}], json_schema=schema) == "plain [1]"
+    assert seen[0]["response_format"]["json_schema"]["schema"] == schema
+    assert "response_format" not in seen[1]
+    # Later calls skip the unsupported parameter entirely.
+    provider.complete([{"role": "user", "content": "q"}], json_schema=schema)
+    assert "response_format" not in seen[2]
+    assert len(seen) == 3
+
+
+def test_bad_request_without_structured_output_is_an_error() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        del request
+        return httpx2.Response(400, json={"error": {"message": "bad"}})
+
+    with pytest.raises(LLMError, match="rejected"):
+        _provider(handler).complete([{"role": "user", "content": "q"}])
+
+
+def test_null_content_with_refusal_is_an_empty_reply() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        del request
+        return httpx2.Response(
+            200,
+            json={"choices": [{"message": {"content": None, "refusal": "I can't help."}}]},
+        )
+
+    assert _provider(handler).complete([{"role": "user", "content": "q"}]) == ""

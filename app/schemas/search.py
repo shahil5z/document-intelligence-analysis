@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -63,7 +64,8 @@ class AskRequest(BaseModel):
 
 
 class Citation(BaseModel):
-    source_id: str = Field(examples=["S1"], description="Label used in the answer text.")
+    number: int = Field(examples=[1], description="Marker used in the answer text: [number].")
+    source_id: str = Field(examples=["S1"], description="Stable label of the source (S<number>).")
     chunk_id: uuid.UUID
     document_id: uuid.UUID
     filename: str
@@ -82,3 +84,13 @@ class AskResponse(BaseModel):
     sources_considered: int = Field(description="Passages sent to the language model.")
     model: str | None = Field(description="LLM used; null when no LLM call was made.")
     warnings: list[str] = Field(default_factory=list)
+    partial: bool = Field(
+        default=False, description="Only part of the question is supported by the sources."
+    )
+    missing_information: str | None = Field(
+        default=None, description="What the sources do not cover (partial answers only)."
+    )
+    insufficient_reason: (
+        Literal["below_threshold", "model_declined", "parse_failed", "no_valid_citations"] | None
+    ) = Field(default=None, description="Why no grounded answer was produced.")
+    prompt_version: str = Field(description="Version of the prompt files in app/prompt/.")

@@ -150,6 +150,15 @@ class Settings(BaseSettings):
     # measured with bge-small-en-v1.5 on the small synthetic set (docs/rag.md); recalibrate
     # when the model or the corpus changes.
     min_evidence_similarity: float = Field(default=0.48, ge=-1.0, le=1.0)
+    # /ask: passages retrieved (hybrid) per question when the request gives no top_k, and
+    # the lowest cosine similarity a passage needs to be sent as context once the best
+    # passage has passed MIN_EVIDENCE_SIMILARITY (keeps supporting passages that a
+    # document-level question matches only loosely). Recalibrated 2026-10-18 with
+    # scripts/calibrate_evidence_threshold.py: document-level questions 0.507-0.584,
+    # off-topic 0.388-0.451 (docs/rag.md). A value above MIN_EVIDENCE_SIMILARITY is
+    # capped at it.
+    ask_top_k: int = Field(default=8, ge=1, le=100)
+    ask_context_min_similarity: float = Field(default=0.40, ge=-1.0, le=1.0)
 
     reranking_enabled: bool = False
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -161,9 +170,12 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
-    llm_max_output_tokens: int = Field(default=700, ge=16, le=8192)
+    llm_max_output_tokens: int = Field(default=900, ge=16, le=8192)
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-    max_context_tokens: int = Field(default=3000, ge=100, le=100_000)
+    max_context_tokens: int = Field(default=4000, ge=100, le=100_000)
+    # Request OpenAI structured outputs (response_format json_schema, app/prompt/
+    # response_schema.json). Endpoints that reject it are retried once without it.
+    llm_structured_output: bool = True
 
     # --- DIP3: hardening, rate limiting, observability ----------------------------------
     # Swagger UI / ReDoc / openapi.json. None = enabled except when APP_ENV=production.
@@ -307,6 +319,8 @@ class Settings(BaseSettings):
         problems: list[str] = []
         if self.chunk_overlap >= self.chunk_size:
             problems.append("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
+        if self.ask_top_k > self.max_top_k:
+            problems.append("ASK_TOP_K must not exceed MAX_TOP_K")
         if self.top_k > self.max_top_k:
             problems.append("TOP_K must not exceed MAX_TOP_K")
         if self.candidate_k < self.max_top_k:
