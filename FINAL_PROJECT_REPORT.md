@@ -1,0 +1,314 @@
+# Final project report: Document Intelligence Platform
+
+Branch `final`. Verification ran on 2026-10-18 on the Linux build box (8 vCPU Intel Xeon,
+15 GiB RAM, Docker Compose, Python 3.12.15, uv). Nothing here was run on Windows, on
+GitHub Actions or against a real OpenAI model; those items are marked NOT VERIFIED.
+Status words: **PASS** (run here, result shown), **PARTIAL**, **NOT VERIFIED** (not run),
+**NOT IMPLEMENTED**.
+
+## 1. Summary
+
+A multi-tenant document Q&A backend: FastAPI API, PostgreSQL 16 + pgvector, Redis,
+Celery worker. Users upload PDF/DOCX/TXT; the worker extracts, normalizes, chunks and
+embeds the text locally (`BAAI/bge-small-en-v1.5`, 384-d); `/search` offers semantic,
+keyword and hybrid (RRF) retrieval; `/ask` answers from retrieved passages only, with
+validated citations, and skips the LLM entirely when evidence is weak. Every query is
+owner-scoped inside SQL.
+
+Final phase: 11 commits on top of the DIP3 snapshot fixing seven reliability/security
+gaps, one large performance bug (PyTorch thread oversubscription), Docker/CI
+verification and a documentation rewrite. Final state: 364 tests passed, 0 skipped,
+96% coverage; Docker build and fresh-volume compose run healthy; smoke test 41/41.
+
+## 2. Repository and branches
+
+| Ref | Commit | Content |
+| --- | --- | --- |
+| `main` | `2643292` | DIP1, 19 commits (unchanged) |
+| `dip2` | `7eba5a1` | DIP1 + DIP2, 14 more commits (unchanged) |
+| `final` | `6b054d3` + 12 commits | DIP3 wip snapshot (kept as-is) + final phase |
+
+No remote was added and nothing was pushed. The bundle `/workspace/dip-final.bundle`
+contains `final` only; `.env` was never committed.
+
+## 3. What each stage contained
+
+- **DIP1** (`main`): uv/Python 3.12 scaffold; FastAPI app factory and error envelope;
+  domain state machine; SQLAlchemy models + hand-written migration `0001`; JWT auth
+  (register, JSON + OAuth2 login, roles, admin endpoints, audit log); validated
+  uploads, local storage with traversal guard; Celery job pipeline hook; JSON logging
+  and request ids; readiness probe; Dockerfile + compose; `generate_env.py`; tests
+  against real PostgreSQL.
+- **DIP2** (`dip2`): PDF/DOCX/TXT extraction, normalization, token-aware chunking;
+  sentence-transformers embeddings, optional cross-encoder, HTTP LLM client; migration
+  `0002` (`document_chunks`, HNSW, generated `tsvector`); semantic/keyword/hybrid
+  search; grounded `/ask` with evidence threshold and citation validation; reprocess;
+  retrieval evaluation (18 queries); smoke test extended.
+- **DIP3** (work that was uncommitted, then snapshotted as `6b054d3` "wip(dip3)" on
+  `final`, 51 files): rate limiting (Redis/memory), body-size middleware, security
+  headers, docs off in production, production config checks, Prometheus metrics (API +
+  worker exporter), worker reliability (soft limit message, bounded claims, DB outage
+  handling, reprocess row lock), compose hardening, CI workflow, docs, DIP3 handoff.
+
+## 4. Architecture (final)
+
+Pure-ASGI middleware chain RequestContext -> SecurityHeaders -> BodySizeLimit -> CORS;
+routes -> services -> owner-scoped repositories -> SQLAlchemy 2 (sync, psycopg 3).
+Worker: Celery (acks_late, bounded claims, 240 s soft / 300 s hard limits) with
+embedded beat for the stale-job reconciler; metrics exporter on 9100. Redis: broker +
+fixed-window rate limits. Details: [docs/architecture.md](docs/architecture.md).
+
+## 5. Handoff claims vs code (discrepancies)
+
+| Claim | Code / reality |
+| --- | --- |
+| DIP2: empty LLM reply -> 503 | treated as insufficient evidence (200) |
+| DIP2: scanned-PDF message text | code: "No extractable text was found. Scanned documents and images are not supported (OCR is not implemented)." |
+| DIP2: hard-time-limit kill leaves the job `processing` | DIP3 bounded claims; final adds terminal failure + reconciler |
+| DIP3: work uncommitted on `dip2` | committed as `6b054d3` on `final` |
+| CI triggers on `dip3` | branch never existed; `final` was missing |
+| Compose honours `.env` upload allow-lists | `ALLOWED_EXTENSIONS` / `ALLOWED_CONTENT_TYPES` (and `LLM_MAX_OUTPUT_TOKENS` / `LLM_TEMPERATURE`) were not passed to containers |
+| Secrets kept out of the image | `.dockerignore` did not exclude a root file `env` or `*.bak` |
+| Redis password handling | password was on the `redis-server` command line (visible in `ps`) |
+| Worker exporter NOT VERIFIED | now verified live |
+| README test numbers | still quoted DIP3 Windows 330 passed / 3 skipped |
+| Rate limiting | failed open everywhere, including login |
+| Stuck jobs | no reaper existed |
+| DOCX "paragraphs + tables" | correct, but headers/footers/footnotes/comments/text boxes and `.doc` were not stated as unsupported |
+| DIP1 OpenAI embedding/chat adapters | still exported from `app/ai` and tested, but not used by the pipeline or `/ask` (legacy) |
+
+## 6. Fixes in the final phase
+
+| # | Fix | Test |
+| --- | --- | --- |
+| a | Rate limiter on Redis failure: fail **closed** (503 + `Retry-After: 5`, no credential check) for register/login/login-per-email; fail **open** elsewhere; `dip_rate_limiter_errors_total{scope,decision}` + warning log | parametrized unit tests (3 credential endpoints, fail-open log/metric), real-Redis counter test, live Redis-stop check |
+| b | Terminal `failed` on the final transient attempt; stale-job reconciler (beat every 300 s + CLI; `SKIP LOCKED`; outcome `stale_failed`); timeout must exceed the hard limit | 5 integration tests, unit tests for final attempt + beat schedule; live: 4 attempts -> `failed` |
+| c | Base images pinned by multi-arch index digest (Dockerfile, compose, CI), tags kept and documented | `imagetools inspect` on 2026-10-18; clean build |
+| d | pgvector policy: readiness fails if missing or < 0.5.0; warning below 0.8 | parametrized unit test + readiness test; suite on 0.6.2 and 0.8.7 |
+| e | Reprocess concurrency (row lock) | thread test: [202, 409], one job, one dispatch; fails [202, 202] without the lock |
+| f | Early 413 on `Content-Length` before reading the body; streaming limit | raw ASGI test (receive never called); smoke: headers-only request -> 413, file part -> 413 |
+| g | DOCX/OCR limits stated accurately | docs |
+| - | Redis password moved to a 0600 config file; restart loop fixed (`rm -f` first, `fs.protected_regular`) | live: `ps` shows no password; stop/start and restart recover |
+| - | Compose passes allow-lists and LLM output settings; `.dockerignore` excludes `env`, `*.bak` | compose run |
+| - | `TORCH_NUM_THREADS` (default 2) | unit test; benchmark before/after |
+| - | `generate_env.py --merge` (byte-preserving, CRLF, `.bak`, atomic 0600, names only) | 16 unit tests; dry run vs a 24-key `.env` |
+| - | Smoke test: early 413, 401, foreign `/ask` / reprocess 404, second reprocess 409, metrics labels, `--check-rate-limit`, `--real-llm`; stub LLM; benchmark script | live run |
+
+## 7. Verification results
+
+| Check | Result |
+| --- | --- |
+| `ruff check .` | PASS, clean |
+| `ruff format --check .` | PASS, 170 files formatted |
+| `mypy app tests scripts` (strict) / `mypy` (CI config) | PASS, 147 / 150 source files, no issues |
+| `pytest --cov=app` (PostgreSQL 16.15 + pgvector 0.8.7, Redis 7.4.11 with password) | **PASS, 364 passed, 0 skipped, 96% (3370 statements, 148 missed), 57.7 s** |
+| Same suite before the final phase | 333 passed, 0 skipped, 95% |
+| DB-backed tests (`tests/api` + `tests/integration`) on pgvector 0.6.2 | PASS, 129 passed (fallback path) |
+| Alembic on a fresh DB: upgrade head, check, downgrade base, upgrade head, check | PASS, "No new upgrade operations detected.", `0002 (head)` |
+| actionlint 1.7.7 on `.github/workflows` | PASS, exit 0 |
+| `pip-audit` on `uv export` | PASS, "No known vulnerabilities found" (torch skipped: not on PyPI) |
+| Each new commit compiles (`compileall`) | PASS, 11/11 |
+
+## 8. Docker verification
+
+Generated `.env` (fake OpenAI key, `API_PORT=8010`, `HF_HUB_OFFLINE=1`), compose with
+`docker-compose.stub-llm.yml`, project `dipfinal`, fresh volumes; the model cache volume
+was seeded from the host cache because containers on this box cannot resolve
+huggingface.co.
+
+| Check | Result |
+| --- | --- |
+| `docker compose build --no-cache` | PASS, 56 s, image 1.57 GB |
+| `up -d --wait` on fresh volumes | PASS, 39 s; postgres, redis, api, worker, stub-llm healthy; migrate exited 0 (0001, 0002) |
+| `/health/ready` | PASS: database, pgvector (0.8.7), redis ok |
+| `scripts/smoke_test.py --ask-expect answer --check-rate-limit` | **PASS, 41/41 checks, 13 s** |
+| API runs as uid 10001; `alembic current` in container | PASS, `0002 (head)` |
+| Redis without auth | PASS, `NOAUTH Authentication required.`; `ps` shows `redis-server *:6379` as user redis, no password |
+| Redis stopped (live) | PASS: login and register 503 + `Retry-After: 5`; search and list 200; readiness 503 `redis: error`; metric `decision=fail_closed` (login, register) / `fail_open` (search) |
+| Redis restart / stop+start | PASS after the fix (found a crash loop first: `Permission denied` on the old config file) |
+| Worker reconnects after Redis restart | PASS (healthy again) |
+| Worker exporter `:9100` | PASS: aggregated `dip_processing_jobs_total`, stage histograms |
+| Beat task `jobs.reconcile_stale` | PASS, ran and succeeded; CLI `reconcile-stale-jobs` -> "Marked 0 stale job(s) as failed" |
+| Model unavailable (first run, no internet, no cache) | PASS as failure path: 4 attempts, each stopped by the soft limit, then job and document `failed` "Processing failed after several attempts" |
+| Logs after the smoke test | PASS: 0 occurrences of JWT secret, Postgres password, Redis password, fake OpenAI key, document text, answer text, bearer tokens, e-mails, "password" |
+
+## 9. Security audit
+
+- **Isolation**: all document/job/chunk/audit queries filter by owner in SQL; chunk
+  queries also require `documents.status='completed'`. Cross-user matrix (GET, status,
+  DELETE, reprocess, list, search x3 modes, search/ask with a foreign `document_id`)
+  returns 404 / empty - PASS in tests and live.
+- **Prompt injection / answer integrity**: escaped `<untrusted_sources>` block, data-not-
+  instructions system prompt; no retrieval or best similarity < 0.48 -> insufficient
+  evidence with `model: null` and no LLM call; unknown `[S#]` stripped (stub's forged
+  `[S99]` removed live); LLM failures -> controlled 503; empty reply -> insufficient
+  evidence - PASS.
+- **HTTP**: nosniff, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, CORP
+  same-origin, HSTS in production; explicit CORS origins; JWT with required claims,
+  pinned algorithm and issuer, role re-read from the DB; Argon2id - PASS (tests).
+- **Logs/metrics**: no secrets or document text (live count above); metric labels are
+  route templates and fixed enums - PASS.
+- **Secret audit (tracked files at `final` and full history of all refs; file:pattern
+  only)**:
+
+| File | Pattern | Assessment |
+| --- | --- | --- |
+| `.env.example` | `API_KEY=`, `PASSWORD=` (x2), `SECRET_KEY=` | `replace-with-...` placeholders (rejected at startup) |
+| `.github/workflows/ci.yml` | `PASSWORD=`, `SECRET_KEY=` | runtime-generated (`openssl rand`, masked) / `ci-only-...` test values |
+| `docs/manual-testing.md` | `API_KEY=` | literal placeholder `sk-...` |
+| `tests/unit/test_generate_env.py` | `API_KEY=` (x3) | template expressions in test code |
+| `tests/unit/test_llm_provider.py`, `tests/unit/test_observability.py` | `sk-` | fake `sk-test...` keys |
+| history | same files (commits `7ddde9e`, `62e4af0`, `ffbde0a`, `6b054d3`, `2ec3156`) | same placeholders/fakes |
+
+  No `sk-proj-`, AWS, GitHub, Slack, private-key or JWT-shaped strings anywhere in
+  history; `.env`, `env` and `.env.bak` were never committed.
+
+## 10. OpenAI / LLM configuration
+
+`/ask` uses `OPENAI_API_KEY` with `LLM_PROVIDER=openai`, `LLM_MODEL` (default
+`gpt-4o-mini`), `LLM_BASE_URL` (default `https://api.openai.com/v1`),
+`LLM_TIMEOUT_SECONDS` (30), `LLM_MAX_OUTPUT_TOKENS` (700), `LLM_TEMPERATURE` (0). The
+client is created lazily on the first `/ask` that has evidence and cached per
+configuration; errors map to `LLMError` -> 503; missing/placeholder key -> 503 "not
+configured". Status: code path **PASS** with the stub over real HTTP in Docker; **real
+OpenAI NOT VERIFIED** (no real key here; nothing contacted OpenAI from the stack). One
+manual Python check inside the container mistakenly instantiated the legacy DIP1 SDK
+embedding adapter with the fake key; the request failed at DNS resolution
+("Temporary failure in name resolution"), so nothing reached OpenAI. Procedure for
+the user: [docs/manual-testing.md](docs/manual-testing.md#real-openai-test-optional-costs-money),
+`scripts/smoke_test.py --real-llm`.
+
+## 11. CI
+
+`.github/workflows/ci.yml`: lint (actionlint, ruff, format, mypy), test (pgvector
+service + password Redis, pytest with `--cov-fail-under=90`, Alembic cycle), audit
+(pip-audit), docker (build, uid check, import check, `compose config`). Locally run:
+actionlint (PASS), every lint/test/audit command (PASS, section 7), docker job steps
+(uid 10001, `import app.main`, `compose config --quiet` - PASS). **The workflow has
+never run on GitHub** (no remote): NOT VERIFIED.
+
+## 12. Benchmark
+
+Method: `scripts/benchmark.py`, single sequential client on the same host as the
+compose stack; ingestion = upload 201 -> status `completed`, polled every 0.1 s, one-page
+PDFs (1 chunk), one warm-up; search = client latency of `POST /search` (`top_k` 5),
+10 queries cycled, one warm-up per mode; rate limits raised for the run only.
+
+| Measurement | n | p50 | p95 | max |
+| --- | --- | --- | --- | --- |
+| Ingestion | 20 | 131 ms | 145 ms | 145 ms |
+| Semantic search | 50 | 27 ms | 101 ms | 122 ms |
+| Keyword search | 50 | 6 ms | 12 ms | 12 ms |
+| Hybrid search | 50 | 28 ms | 62 ms | 128 ms |
+
+Before `TORCH_NUM_THREADS` (same stack, n=10/30): ingestion p50 1885 ms, semantic p50
+1504 ms, hybrid p50 1475 ms, keyword 6 ms. Corpus 21 documents / 21 chunks, so index
+scaling is not represented. Throughput and concurrency: NOT MEASURED.
+
+## 13. Environment: keys missing from the user's `.env`
+
+The user's `.env` has the 24 DIP1 keys. `generate_env.py --merge --dry-run` against a
+`.env` with exactly those keys lists **43 missing keys, all optional** (defaults apply;
+none is mandatory - the three mandatory secrets are already present):
+
+| Group | Keys |
+| --- | --- |
+| Embeddings / chunking | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSION`, `EMBEDDING_BATCH_SIZE`, `TORCH_NUM_THREADS`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `MAX_CHUNKS_PER_DOCUMENT`, `HF_HUB_OFFLINE` |
+| Retrieval | `TOP_K`, `MAX_TOP_K`, `CANDIDATE_K`, `MAX_QUERY_LENGTH`, `MIN_EVIDENCE_SIMILARITY`, `RERANKING_ENABLED`, `RERANKER_MODEL`, `RERANK_TOP_K` |
+| LLM | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_BASE_URL`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_OUTPUT_TOKENS`, `LLM_TEMPERATURE`, `MAX_CONTEXT_TOKENS` |
+| HTTP hardening | `API_DOCS_ENABLED`, `MAX_REQUEST_BODY_BYTES`, `UPLOAD_BODY_OVERHEAD_BYTES`, `SECURITY_HEADERS_ENABLED` |
+| Rate limiting | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_BACKEND`, `RATE_LIMIT_REGISTER`, `RATE_LIMIT_LOGIN`, `RATE_LIMIT_LOGIN_PER_EMAIL`, `RATE_LIMIT_UPLOAD`, `RATE_LIMIT_SEARCH`, `RATE_LIMIT_ASK`, `RATE_LIMIT_REPROCESS` |
+| Operations | `METRICS_ENABLED`, `WORKER_METRICS_PORT`, `CELERY_TASK_SOFT_TIME_LIMIT`, `CELERY_TASK_TIME_LIMIT`, `STALE_JOB_TIMEOUT_SECONDS`, `STALE_JOB_CHECK_INTERVAL_SECONDS` |
+
+Recommended on the PC: `py -3.12 scripts\generate_env.py --merge --dry-run`, then
+`--merge` (writes `.env.bak`, changes no existing value, prints names only).
+`OPENAI_API_KEY` must be a real key for `/ask`; `LLM_MODEL` is worth setting explicitly.
+
+## 14. Known limitations
+
+No OCR; DOCX body paragraphs + tables only, no `.doc`, no page numbers; retrieval
+quality measured on 18 synthetic queries only (threshold 0.48 from the same set); no
+entailment check of citations; fixed-window rate limits; upload rate limit after body
+receipt; unauthenticated `/metrics`; no refresh tokens/revocation/lockout; local storage
+only; model revision not pinned; Redis password visible via `docker inspect`; LLM client
+sends `max_tokens`/`temperature` (some reasoning models reject them); legacy DIP1 OpenAI
+SDK adapters still in `app/ai`; no tracing; no image scan; single-machine sequential
+benchmark only.
+
+## 15. Files changed in the final phase (vs `6b054d3`)
+
+48 files, +2513 / -590. New: `app/workers/reconcile.py`, `tests/integration/test_stale_jobs.py`,
+`scripts/benchmark.py`, `scripts/stub_llm_server.py`, `docker-compose.stub-llm.yml`,
+`docs/manual-testing.md`, `FINAL_PROJECT_REPORT.md`. Modified: `.dockerignore`,
+`.env.example`, `.github/workflows/ci.yml`, `Dockerfile`, `docker-compose.yml`,
+`README.md`, the three handoffs, `app/ai/{embeddings,factory,reranker}.py`,
+`app/api/dependencies/rate_limit.py`, `app/api/routes/health.py`, `app/cli.py`,
+`app/core/{config,metrics,rate_limit}.py`, `app/db/repositories/chunks.py`,
+`app/services/health_service.py`, `app/workers/{celery_app,processing,tasks}.py`,
+`scripts/{generate_env,smoke_test}.py`, 8 test modules, 11 docs.
+
+## 16. Commits on `final` after `6b054d3`
+
+1. `342933f` fix(rate-limit): fail closed for credential endpoints when Redis is down
+2. `0182655` fix(worker): terminal failure on retry exhaustion and stale-job reconciler
+3. `e8e4284` feat(health): enforce pgvector >= 0.5.0 in readiness
+4. `2e55dd0` test(reprocess): prove the row lock serialises concurrent reprocess requests
+5. `069e9e3` perf(embeddings): cap PyTorch threads per process (TORCH_NUM_THREADS=2)
+6. `acb1d7e` feat(env): generate_env.py --merge adds missing keys to an existing .env
+7. `41d108c` build(docker): pin images by digest, keep the Redis password off argv
+8. `1a658ff` ci: run on final, pin service images, lint workflows with actionlint
+9. `a828dba` test(smoke): cover early 413, rate limits, isolation and a --real-llm mode; add benchmark
+10. `2ec3156` docs: rewrite README ...; security, testing, observability, performance, deployment, manual testing
+11. `a71e21d` docs: update architecture, processing, retrieval, RAG and portfolio; mark stage handoffs as history
+12. the commit adding this report
+
+## 17. NOT VERIFIED
+
+Real OpenAI `/ask`; the Windows routes (Docker Desktop and no-Docker) and the 26-step
+PowerShell checklist; GitHub Actions run; real cross-encoder reranker; model download
+from Hugging Face inside containers (box DNS; cache was seeded); arm64 images;
+throughput/concurrency/large corpora; retrieval quality on real documents.
+
+## 18. VERIFIED CV EVIDENCE
+
+- Multi-tenant document Q&A backend (FastAPI, PostgreSQL/pgvector, Celery, Redis) with
+  owner-scoped hybrid retrieval and citation validation: **364 automated tests, 96%
+  coverage**, against real PostgreSQL + pgvector (0.8.7, and 0.6.2 for the fallback).
+- Credential endpoints fail closed when the rate-limit store is down; verified live by
+  stopping Redis (login/register 503, other endpoints available).
+- Background jobs always reach a terminal state: bounded retries, terminal failure,
+  stale-job reconciler with `SKIP LOCKED`; observed live (4 attempts -> `failed`).
+- Diagnosed PyTorch thread oversubscription: semantic search p50 **1504 ms -> 27 ms**,
+  ingestion p50 **1885 ms -> 131 ms** (same machine, sequential).
+- Concurrency test proves exactly one of two simultaneous reprocess requests succeeds.
+- Hardened Docker deployment: digest-pinned images, non-root, `cap_drop: ALL`, Redis
+  password off the command line; clean build 56 s, fresh start 39 s, smoke 41/41.
+- Prometheus metrics with bounded labels for API and worker; logs verified free of
+  secrets and document text.
+
+## 19. FINAL PROJECT STATUS
+
+| Area | Status | Value |
+| --- | --- | --- |
+| Lint / format / types | PASS | ruff clean; 170 files formatted; mypy strict 0 issues |
+| Test suite | PASS | 364 passed, 0 skipped, 96% |
+| pgvector < 0.8 fallback | PASS | 129 DB tests on 0.6.2 |
+| Migrations | PASS | fresh upgrade, check, downgrade, upgrade |
+| Docker build + compose | PASS | 56 s build, 39 s up, all healthy |
+| Smoke test (stub LLM) | PASS | 41/41 |
+| Rate limiting incl. Redis outage | PASS | live 401x5 -> 429; outage 503 / 200 |
+| Upload limits (early 413, streaming) | PASS | tests + live |
+| Reprocess concurrency | PASS | [202, 409] |
+| Stale jobs / retry exhaustion | PASS | tests + live failure path |
+| Worker metrics exporter | PASS | live |
+| Security headers / CORS / JWT / Argon2id | PASS | tests |
+| Log hygiene | PASS | 0 secret/content occurrences |
+| Secret audit (files + history) | PASS | placeholders and fakes only |
+| Dependency audit | PASS | no known vulnerabilities (torch skipped) |
+| CI workflow | PARTIAL | actionlint + commands locally; never run on GitHub |
+| Benchmark | PARTIAL | sequential single-machine numbers only |
+| Real OpenAI `/ask` | NOT VERIFIED | needs the user's key |
+| Windows setup / manual checklist | NOT VERIFIED | written, not executed |
+| Real reranker | NOT VERIFIED | fake only |
+| OCR | NOT IMPLEMENTED | explicit failure message |
+| Tracing | NOT IMPLEMENTED | - |
