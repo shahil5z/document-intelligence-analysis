@@ -8,9 +8,9 @@ Status: DIP1 (backend foundation). Items marked *planned* do not exist in the co
 flowchart LR
     client[Client / Swagger UI] -->|HTTPS JSON + multipart| api[FastAPI API<br/>app/main.py]
     api -->|SQLAlchemy sync, psycopg 3| pg[(PostgreSQL 16<br/>+ pgvector extension)]
-    api -->|publish documents.process| redis[(Redis<br/>Celery broker)]
+    api -->|publish documents.process, AUTH| redis[(Redis<br/>Celery broker, requirepass)]
     api -->|save / delete| storage[[Storage volume<br/>LocalStorage]]
-    worker[Celery worker<br/>app/workers] -->|consume| redis
+    worker[Celery worker<br/>app/workers] -->|consume, AUTH| redis
     worker -->|claim / update job| pg
     worker -->|read| storage
     migrate[migrate service<br/>alembic upgrade head] --> pg
@@ -29,6 +29,7 @@ flowchart LR
 | Storage | `app/storage/` | `StorageService` interface + `LocalStorage` with traversal guard. |
 | Workers | `app/workers/` | Celery app, task adapter, framework-free `DocumentProcessor`, pipeline steps. |
 | Core | `app/core/` | Settings, security (Argon2, JWT), JSON logging, request context, errors, middleware. |
+| AI providers | `app/ai/` | `LLMProvider` / `EmbeddingProvider` protocols and an OpenAI-backed factory for DIP2. Not used by any DIP1 code path. |
 
 ## Upload flow
 
@@ -190,8 +191,15 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
   generated server side; path traversal guard in `LocalStorage`.
 - **Output**: no storage keys, generated filenames, Celery task ids or stack traces in
   responses; validation errors never echo submitted values.
-- **Secrets**: only from environment; `JWT_SECRET` required, >= 32 chars, placeholder
-  values rejected in production. Logs redact keys containing password/token/secret/authorization.
+- **Secrets**: only from environment, held as `SecretStr`. `JWT_SECRET_KEY` is always
+  required (>= 32 chars); `POSTGRES_PASSWORD` and `REDIS_PASSWORD` are required outside
+  `APP_ENV=test` (unless full URLs are given); `.env.example` placeholders are rejected.
+  Configuration errors name the variable but never include its value. Logs redact keys
+  containing password/token/secret/authorization; Celery prints the broker as `redis://:**@...`.
+- **Redis**: `--requirepass` in compose; the API, worker and readiness check use the
+  authenticated URL built from `REDIS_*`. Unauthenticated commands get `NOAUTH`.
+- **OpenAI key**: optional; read only when a DIP2 provider is requested through
+  `app/ai/factory.py`. The SDK is not imported at API/worker startup.
 - **CORS**: explicit origins only; `*` rejected at startup.
 - **Containers**: non-root user (uid 10001); Postgres/Redis are not published to the host.
 - **Not yet**: rate limiting, account lockout, token revocation, refresh tokens, request
@@ -204,8 +212,8 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 - `X-Request-ID`: reused if it matches `^[A-Za-z0-9-]{8,64}$`, otherwise a UUID4 is
   generated; always echoed on the response and included in error bodies. The upload's
   request id is passed to the Celery task so worker logs share it.
-- `GET /health` (liveness, no I/O), `GET /health/ready` (PostgreSQL `SELECT 1`, Redis
-  `PING`, 503 if either fails).
+- `GET /health` and `GET /health/live` (liveness, no I/O), `GET /health/ready`
+  (PostgreSQL `SELECT 1`, authenticated Redis `PING`, 503 if either fails).
 
 ## Integration points for later stages
 
@@ -214,7 +222,8 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 | DIP2 | Add `PipelineStep`s (extract, chunk, embed) | `app/workers/pipeline.py::build_default_pipeline` |
 | DIP2 | New tables (`document_chunks` with `vector` column) | new Alembic revision after `0001` |
 | DIP2 | Search / ask routes and services | `app/api/routes/`, `app/services/`, register in `app/api/router.py` |
-| DIP2 | Object storage backend | implement `StorageService`, select in `app/storage/factory.py` |
+| DIP2 | Object storage backend | implement `StorageService`, add to `SUPPORTED_BACKENDS` in `app/storage/factory.py` |
+| DIP2 | LLM / embedding calls | `app/ai/factory.py` (`get_llm_provider`, `get_embedding_provider`) |
 | DIP3 | Rate limiting middleware/dependency | `app/main.py::_register_middleware` |
 | DIP3 | Metrics/tracing | `app/core/middleware.py`, `app/core/logging.py` |
-| DIP3 | CI | commands listed in `DIP3_HANDOFF.md` |
+| DIP3 | CI | commands listed in [DIP3_HANDOFF.md](../DIP3_HANDOFF.md) |
