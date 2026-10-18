@@ -6,6 +6,9 @@ are being (re)processed, failed or deleted (rows removed, chunks cascade) are th
 never searchable. Ties are broken by chunk id so result order is deterministic.
 """
 
+import logging
+import re
+import threading
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -33,7 +36,28 @@ from app.db.models import Document, DocumentChunk
 from app.db.models.document_chunk import TEXT_SEARCH_CONFIG
 from app.domain.enums import DocumentStatus
 
+logger = logging.getLogger(__name__)
+
 _REGCONFIG: ColumnClause[Any] = literal_column(f"'{TEXT_SEARCH_CONFIG}'::regconfig")
+
+# hnsw.iterative_scan exists from pgvector 0.8.0. On older versions PostgreSQL rejects the
+# parameter ("hnsw" is a reserved prefix), so it is only set when supported; the result
+# is cached per database URL (password hidden) for the life of the process.
+ITERATIVE_SCAN_MIN_VERSION = (0, 8, 0)
+_iterative_scan_support: dict[str, bool] = {}
+_support_lock = threading.Lock()
+
+
+def parse_extension_version(version: str | None) -> tuple[int, ...]:
+    """``"0.8.0"`` -> ``(0, 8, 0)``; unknown or missing -> ``()``."""
+    if not version:
+        return ()
+    return tuple(int(part) for part in re.findall(r"\d+", version)[:3])
+
+
+def supports_iterative_scan(version: str | None) -> bool:
+    parsed = parse_extension_version(version)
+    return bool(parsed) and parsed >= ITERATIVE_SCAN_MIN_VERSION
 
 
 @dataclass(frozen=True)
@@ -158,7 +182,8 @@ class ChunkRepository:
         distance = DocumentChunk.embedding.cosine_distance(list(query_embedding))
         # Filtered HNSW scans can return fewer rows than LIMIT; iterative scans
         # (pgvector >= 0.8) keep scanning until enough rows pass the filters.
-        self._session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
+        if self._iterative_scan_available():
+            self._session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
         self._session.execute(
             text("SELECT set_config('hnsw.ef_search', :value, true)"),
             {"value": str(max(40, limit * 2))},
@@ -174,6 +199,25 @@ class ChunkRepository:
             .limit(limit)
         )
         return [_to_hit(row) for row in self._session.execute(query)]
+
+    def _iterative_scan_available(self) -> bool:
+        bind = self._session.get_bind()
+        key = bind.engine.url.render_as_string(hide_password=True)
+        cached = _iterative_scan_support.get(key)
+        if cached is not None:
+            return cached
+        version = self._session.scalar(
+            text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+        )
+        supported = supports_iterative_scan(version)
+        with _support_lock:
+            _iterative_scan_support[key] = supported
+        if not supported:
+            logger.warning(
+                "search.pgvector_iterative_scan_unsupported",
+                extra={"pgvector_version": version, "required": "0.8.0"},
+            )
+        return supported
 
     def keyword_search(
         self,

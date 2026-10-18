@@ -14,6 +14,7 @@ import httpx2
 
 from app.ai.base import ChatMessage
 from app.ai.errors import LLMError
+from app.core.metrics import LLM_LATENCY
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,30 @@ class OpenAICompatibleLLMProvider:
         }
         started = time.perf_counter()
         try:
+            content, body = self._post(payload)
+        except LLMError:
+            LLM_LATENCY.labels("error").observe(time.perf_counter() - started)
+            raise
+        elapsed = time.perf_counter() - started
+        LLM_LATENCY.labels("ok").observe(elapsed)
+        usage = body.get("usage") if isinstance(body, dict) else None
+        # Field names avoid "token" so the log redactor (app/core/logging.py) keeps them.
+        logger.info(
+            "llm.completed",
+            extra={
+                "model": self._model,
+                "duration_ms": round(elapsed * 1000),
+                "usage_prompt": (usage or {}).get("prompt_tokens"),
+                "usage_completion": (usage or {}).get("completion_tokens"),
+            },
+        )
+        return content
+
+    def close(self) -> None:
+        self._client.close()
+
+    def _post(self, payload: dict[str, Any]) -> tuple[str, Any]:
+        try:
             response = self._client.post("/chat/completions", json=payload)
             response.raise_for_status()
             body = response.json()
@@ -77,14 +102,4 @@ class OpenAICompatibleLLMProvider:
             raise LLMError("the language model returned an unexpected response") from exc
         if not isinstance(content, str):
             raise LLMError("the language model returned an unexpected response")
-        usage = body.get("usage") if isinstance(body, dict) else None
-        logger.info(
-            "llm.completed",
-            extra={
-                "model": self._model,
-                "duration_ms": round((time.perf_counter() - started) * 1000),
-                "prompt_tokens": (usage or {}).get("prompt_tokens"),
-                "completion_tokens": (usage or {}).get("completion_tokens"),
-            },
-        )
-        return content
+        return content, body

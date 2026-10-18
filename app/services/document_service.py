@@ -14,7 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.errors import ConflictError, NotFoundError
+from app.core.errors import AppError, ConflictError, NotFoundError
+from app.core.metrics import UPLOADS
 from app.core.request_context import set_document_id
 from app.db.models import Document, DocumentProcessingJob, User
 from app.db.repositories.chunks import ChunkRepository
@@ -79,6 +80,15 @@ class DocumentService:
         self._audit = AuditService(session)
 
     def upload(self, *, owner: User, incoming: IncomingFile) -> UploadResult:
+        try:
+            result = self._upload(owner=owner, incoming=incoming)
+        except AppError as exc:
+            UPLOADS.labels(f"rejected_{exc.status_code}").inc()
+            raise
+        UPLOADS.labels("accepted").inc()
+        return result
+
+    def _upload(self, *, owner: User, incoming: IncomingFile) -> UploadResult:
         original_filename = sanitize_filename(incoming.filename)
         content_type = normalize_content_type(incoming.content_type)
         extension = validate_file_type(
@@ -216,7 +226,11 @@ class DocumentService:
         Existing chunks stay in place but are not searchable while the document is not
         ``completed``; the index step replaces them atomically.
         """
-        document = self.get_document(owner=owner, document_id=document_id)
+        # Row lock: two concurrent reprocess calls serialise here, and the second one
+        # sees "queued" and gets 409 instead of creating a second job.
+        document = self._documents.get_for_owner(document_id, owner.id, for_update=True)
+        if document is None:
+            raise NotFoundError(DOCUMENT_NOT_FOUND)
         if document.status not in REPROCESSABLE_STATUSES:
             raise ConflictError("The document is already queued or being processed")
         job = DocumentProcessingJob(

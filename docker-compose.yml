@@ -51,6 +51,31 @@ x-app-environment: &app-environment
   HF_HOME: /data/models
   # Set to 1 once the model is in the cache (or pre-seeded) to skip Hugging Face network checks.
   HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+  # DIP3: hardening, rate limiting, observability (defaults match app/core/config.py).
+  API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
+  MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-1048576}
+  UPLOAD_BODY_OVERHEAD_BYTES: ${UPLOAD_BODY_OVERHEAD_BYTES:-65536}
+  SECURITY_HEADERS_ENABLED: ${SECURITY_HEADERS_ENABLED:-true}
+  RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+  RATE_LIMIT_BACKEND: ${RATE_LIMIT_BACKEND:-redis}
+  RATE_LIMIT_REGISTER: ${RATE_LIMIT_REGISTER:-5/minute}
+  RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-10/minute}
+  RATE_LIMIT_LOGIN_PER_EMAIL: ${RATE_LIMIT_LOGIN_PER_EMAIL:-5/minute}
+  RATE_LIMIT_UPLOAD: ${RATE_LIMIT_UPLOAD:-30/minute}
+  RATE_LIMIT_SEARCH: ${RATE_LIMIT_SEARCH:-60/minute}
+  RATE_LIMIT_ASK: ${RATE_LIMIT_ASK:-20/minute}
+  RATE_LIMIT_REPROCESS: ${RATE_LIMIT_REPROCESS:-10/minute}
+  METRICS_ENABLED: ${METRICS_ENABLED:-true}
+  CELERY_TASK_SOFT_TIME_LIMIT: ${CELERY_TASK_SOFT_TIME_LIMIT:-240}
+  CELERY_TASK_TIME_LIMIT: ${CELERY_TASK_TIME_LIMIT:-300}
+
+# Container hardening shared by the application services (api, worker, migrate).
+x-app-hardening: &app-hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  init: true
 
 x-app-image: &app-image
   build:
@@ -94,7 +119,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    <<: *app-image
+    <<: [*app-image, *app-hardening]
     command: ["alembic", "upgrade", "head"]
     environment: *app-environment
     depends_on:
@@ -103,7 +128,7 @@ services:
     restart: "no"
 
   api:
-    <<: *app-image
+    <<: [*app-image, *app-hardening]
     environment: *app-environment
     ports:
       - "${API_PORT:-8000}:8000"
@@ -113,22 +138,45 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # Liveness only; /health/ready (PostgreSQL + Redis) is for load balancers.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).status == 200 else 1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
     restart: unless-stopped
 
   worker:
-    <<: *app-image
+    <<: [*app-image, *app-hardening]
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
-    environment: *app-environment
+    environment:
+      <<: *app-environment
+      # Worker metrics: prefork children write to this tmpfs, the main process serves them
+      # on 9100 inside the compose network only (not published to the host).
+      WORKER_METRICS_PORT: "9100"
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+    tmpfs:
+      - /tmp/prometheus:mode=1777,size=16m
+    expose:
+      - "9100"
     volumes:
       - storage_data:/data/storage
       - model_cache:/data/models
     depends_on:
       migrate:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
+    # Let a running document finish (soft limit 240 s) before SIGKILL on shutdown.
+    stop_grace_period: 60s
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers.celery_app:celery_app inspect ping -d celery@$$HOSTNAME --timeout 5"]
       interval: 30s

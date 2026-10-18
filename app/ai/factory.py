@@ -81,6 +81,28 @@ def create_reranker(settings: Settings) -> Reranker | None:
     return _cached_reranker(settings.reranker_model, settings.embedding_device)
 
 
+@lru_cache(maxsize=4)
+def _cached_llm_provider(
+    *,
+    api_key: str,
+    model: str,
+    base_url: str,
+    timeout_seconds: float,
+    max_output_tokens: int,
+    temperature: float,
+) -> OpenAICompatibleLLMProvider:
+    # One HTTP client (connection pool) per process and configuration, instead of a new,
+    # never-closed client per /ask request.
+    return OpenAICompatibleLLMProvider(
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        temperature=temperature,
+    )
+
+
 def create_llm_provider(settings: Settings) -> LLMProvider:
     """Build the /ask LLM client. Raises ``AIProviderConfigurationError`` if unusable."""
     if settings.llm_provider == "none":
@@ -90,7 +112,7 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
         raise AIProviderConfigurationError(
             "OPENAI_API_KEY is not configured; set it in .env to use AI features"
         )
-    return OpenAICompatibleLLMProvider(
+    return _cached_llm_provider(
         api_key=key,
         model=settings.llm_model,
         base_url=settings.llm_base_url,

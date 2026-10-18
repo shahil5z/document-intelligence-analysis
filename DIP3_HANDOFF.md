@@ -1,140 +1,127 @@
-# DIP3 handoff: tests, CI/CD, observability, rate limiting, hardening
+# DIP3 handoff: production hardening
 
-## Verified state at the end of DIP2
+Status on 2026-10-18: implemented in the working tree of branch `dip2` (**uncommitted**,
+no remote). Verified on Windows 11 with Python 3.12.15, a local PostgreSQL 16.2 +
+pgvector 0.6.2 (no Docker) and no Redis. Everything that needs Docker, Redis, a real
+LLM or GitHub is marked **NOT VERIFIED - Docker unavailable** or **NOT VERIFIED**.
 
-Details: [DIP2_HANDOFF.md](DIP2_HANDOFF.md#tests-executed-and-real-results). Last run:
-247 tests passed, 2 skipped (Redis readiness, no `TEST_REDIS_URL`), 94 % line coverage;
-ruff and mypy strict clean; `alembic check` clean with revisions `0001` + `0002`; compose
-stack on fresh volumes passed the extended smoke test (search modes, cross-user
-isolation, `/ask` with a stub LLM, reprocess, delete). Real OpenAI `/ask` and the real
-reranker are NOT VERIFIED.
+DIP1/DIP2 state: [DIP1_HANDOFF.md](DIP1_HANDOFF.md), [DIP2_HANDOFF.md](DIP2_HANDOFF.md).
+This file replaces the earlier DIP3 plan.
 
-### DIP2 files (added / modified)
+## Discrepancies found in the audit
 
-- Added: `app/processing/` (content, extraction, normalization, chunking),
-  `app/ai/embeddings.py`, `reranker.py`, `llm.py`, `app/db/models/document_chunk.py`,
-  `app/db/repositories/chunks.py`, `app/services/retrieval.py`, `search_service.py`,
-  `answer_service.py`, `rag_prompt.py`, `app/schemas/search.py`,
-  `app/api/routes/search.py`, `app/workers/steps.py`,
-  `alembic/versions/20261018_0002_document_chunks.py`, `scripts/evaluate_retrieval.py`,
-  `scripts/calibrate_evidence_threshold.py`, test files listed in DIP2_HANDOFF, docs.
-- Modified: `app/ai/base.py`, `errors.py`, `factory.py`, `openai_provider.py`,
-  `app/core/config.py`, `errors.py`, `app/domain/enums.py`, `app/db/models/processing_job.py`,
-  `app/api/dependencies/services.py`, `app/api/routes/documents.py`, `app/api/router.py`,
-  `app/main.py`, `app/schemas/document.py`, `app/services/document_service.py`,
-  `app/workers/pipeline.py`, `processing.py`, `tasks.py`, `pyproject.toml`, `uv.lock`,
-  `Dockerfile`, `docker-compose.yml`, `.env.example`, `scripts/smoke_test.py`,
-  `tests/conftest.py`, `tests/unit/test_config.py`.
+- DIP2 handoff: 247 passed / 2 skipped. On this machine the unchanged suite gave
+  228 passed, 19 failed, 2 skipped (93%): 17 failures because pgvector 0.6.2 does not
+  know `hnsw.iterative_scan` (needs >= 0.8), 2 because of POSIX-only test assumptions.
+  Fixed by runtime version detection and platform skips.
+- The suite exited without PostgreSQL even for unit tests; fixed (DB fixtures skip).
+- README Windows notes had never been executed; now partly exercised (tests only).
+- LLM token usage was silently redacted in logs (`token` rule); renamed fields.
+- A new LLM HTTP client was created per `/ask` request and never closed; now cached.
 
-### What not to rewrite
+## What changed
 
-The retrieval SQL filters (`ChunkRepository._base`), the embed-then-lock-and-replace
-order in `IndexStep`, citation validation and prompt escaping, lazy model imports, and the
-job state machine. Extend them; see DIP2_HANDOFF "What DIP3 must not break".
+New: `app/core/rate_limit.py`, `app/core/metrics.py`, `app/api/dependencies/rate_limit.py`,
+`app/api/routes/metrics.py`, `.github/workflows/ci.yml`, `tests/api/conftest.py`,
+`tests/integration/conftest.py`, `tests/unit/test_http_hardening.py`,
+`tests/unit/test_rate_limit.py`, `tests/unit/test_production_config.py`,
+`tests/unit/test_answer_service.py`, `tests/unit/test_observability.py`,
+`tests/unit/test_worker_adapters.py`, `tests/integration/test_reliability.py`,
+`tests/api/test_security_matrix.py`, `docs/testing.md`, `docs/observability.md`,
+`docs/performance.md`, `docs/deployment.md`.
 
-## Verified state at the end of DIP1
+Modified: `app/core/{config,errors,middleware}.py`, `app/main.py`,
+`app/api/responses.py`, `app/api/routes/{auth,documents,search}.py`,
+`app/services/{answer,document,search}_service.py`,
+`app/db/repositories/{chunks,documents}.py`, `app/ai/{llm,factory}.py`,
+`app/workers/{celery_app,pipeline,processing,tasks}.py`, `tests/conftest.py`,
+`tests/unit/test_generate_env.py`, `tests/unit/test_storage.py`, `pyproject.toml` +
+`uv.lock` (`prometheus-client>=0.21`, resolved 0.26.0), `.env.example`,
+`docker-compose.yml`, `Dockerfile`, `README.md`, `docs/architecture.md`,
+`docs/SECURITY.md`, `docs/portfolio.md`, this file.
 
-Full results, the test inventory and failures seen during development are in
-[DIP1_HANDOFF.md section 12-13](DIP1_HANDOFF.md#12-tests-executed-and-real-results).
-Summary of the last run: 128 tests passed (94 % line coverage of `app/`), ruff check and
-format clean, mypy strict clean, `alembic check` clean, compose stack healthy from a
-`--no-cache` build on fresh volumes, smoke test passed, Redis rejects unauthenticated
-commands. Without `TEST_REDIS_URL`, two readiness tests are skipped.
+## Results (real runs)
 
-### Missing tests (DIP2 additions)
+| Check | Result |
+| --- | --- |
+| `pytest --cov=app` with PostgreSQL | **330 passed, 3 skipped, 95%** (skips: 2 need `TEST_REDIS_URL`, 1 symlink privilege) |
+| `pytest` without any database | 216 passed, 117 skipped |
+| `ruff check .`, `ruff format --check .` | all checks passed; 165 files already formatted |
+| `mypy` (strict) | no issues in 146 source files |
+| `alembic upgrade head` + `alembic check` | no new upgrade operations |
+| `pip-audit` on `uv export` | no known vulnerabilities; `torch` (CPU index build) skipped as not on PyPI |
+| `ci.yml` | parsed with PyYAML; **never run** |
+| Live uvicorn on 127.0.0.1 (PostgreSQL up, Redis down) | `/health/live` 200 with request id + security headers; `/health/ready` 503 (database ok, redis error); register/login/upload/status/search OK; upload with broker down -> `failed` with the fixed message; 2 MiB JSON -> 413; third login for one email -> 429; `/metrics` labels are route templates and contain no document id; no secret, password or email in 27 log lines |
 
-- Real OpenAI `/ask` run (key only on the Windows host; not verified).
-- Real cross-encoder reranker (only a fake in tests).
-- Prompt-injection evaluation against a real model; answer faithfulness metrics.
-- Larger retrieval evaluation set (current: 18 queries, 6 documents); HNSW recall vs
-  exact search; latency / throughput of embedding and search.
-- Concurrent reprocess + delete races beyond the single-process integration tests.
-- Malformed-PDF fuzzing (only one corrupt, one encrypted, one scanned fixture).
+## Checklist
 
-### Missing tests (from DIP1)
+| Item | Status |
+| --- | --- |
+| Unit/API/security/cross-user/prompt-injection/failure tests without keys or Docker | PASS (API/integration need PostgreSQL) |
+| Upload / request body limits before parsing | PASS |
+| Filename sanitisation | PASS (existing, now covered by hostile-name tests) |
+| CORS (explicit origins, https in production) | PASS |
+| Production config validation | PASS |
+| Error leakage (generic 500, no values in config errors) | PASS |
+| Rate limiting | PARTIAL - in-memory backend verified; Redis backend only tested for fail-open against an unreachable Redis; counting in real Redis **NOT VERIFIED - Docker unavailable** |
+| Structured logging + X-Request-ID | PASS |
+| Prometheus metrics (API) | PASS |
+| Worker metrics exporter | NOT VERIFIED - Docker unavailable (prefork not on Windows) |
+| `/health/live`, `/health/ready` | PASS (ready with real Redis: NOT VERIFIED) |
+| Celery retry / idempotency / partial failure | PASS in tests; with a real broker and worker: NOT VERIFIED - Docker unavailable |
+| pgvector >= 0.8 iterative scan path | NOT VERIFIED (only 0.6.2 fallback ran) |
+| Dockerfile / compose fixes | PARTIAL - static review only; NOT VERIFIED - Docker unavailable |
+| CI workflow | PARTIAL - written and YAML-valid; NOT VERIFIED (never run) |
+| Docs | PASS |
+| Tracing | NOT IMPLEMENTED |
+| Image scanning, digest pinning, read-only rootfs | NOT IMPLEMENTED |
+| Stuck-job reaper | NOT IMPLEMENTED |
+| Real LLM / real reranker | NOT VERIFIED |
 
-- Celery task adapter (`app/workers/tasks.py`, 56 % covered) and `CeleryDocumentTaskDispatcher`
-  against a real broker (exercised only by the manual compose smoke test).
-- `app/cli.py` (0 % covered; exercised manually in compose).
-- Concurrency: two deliveries of one task at once (row lock), duplicate upload race (unique
-  constraint path).
-- Storage delete failure after DB delete; DB commit failure after file save.
-- Token for a deleted user; tokens with tampered `role` claim.
-- DIP1 OpenAI SDK adapters against the real API (only a fake client is used; still unused by `/ask`).
-- Windows host run (README notes are untested).
-- Load / performance tests: not measured yet.
+## Known limitations
 
-## CI/CD (to build)
+- Rate limits fail open when Redis is down, are fixed-window, and for uploads run after
+  the (size-limited) body was received.
+- If the last allowed attempt cannot write its result, the job stays `processing`.
+- Redis password visible in the `redis-server` command line.
+- Performance not measured ([docs/performance.md](docs/performance.md)).
 
-Suggested GitHub Actions jobs:
-1. `uv sync --frozen`, `ruff check`, `ruff format --check`, `mypy`.
-2. Tests with a `pgvector/pgvector:pg16` service container and `redis:7-alpine` started
-   with `--requirepass`; set `TEST_DATABASE_URL` and `TEST_REDIS_URL=redis://:<pw>@localhost:6379/0`
-   from CI secrets or per-run random values. No `OPENAI_API_KEY` and no model download
-   are needed (tests use a hashing embedder and a mock LLM).
-3. `alembic upgrade head && alembic check` against an empty database.
-4. `docker build`, image scan (e.g. Trivy), optional compose smoke test: create `.env`
-   with `python scripts/generate_env.py`, `docker compose up -d`, `scripts/smoke_test.py`.
-   Cache the Hugging Face model (`model_cache` volume / CI cache) or the first document
-   waits for the download; use `--ask-expect unavailable` without an LLM key.
-5. Secret scanning of tracked files (e.g. gitleaks); `.env` and `/env` are git-ignored.
+## Secrets
 
-## Rate limiting
+`.env` is git-ignored (`.gitignore:2`), not tracked and never committed (`git log --all`
+empty for `.env` and `env`). Key names only: APP_NAME, APP_ENV, DEBUG, LOG_LEVEL,
+API_PORT, JWT_SECRET_KEY, JWT_ALGORITHM, JWT_ACCESS_TOKEN_EXPIRE_MINUTES, POSTGRES_HOST,
+POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, REDIS_HOST, REDIS_PORT,
+REDIS_DB, REDIS_PASSWORD, STORAGE_BACKEND, STORAGE_PATH, MAX_UPLOAD_SIZE_BYTES,
+ALLOWED_EXTENSIONS, ALLOWED_CONTENT_TYPES, CORS_ALLOWED_ORIGINS, OPENAI_API_KEY. The new
+DIP3 variables are not in `.env`; their defaults apply.
 
-Not implemented. Hook: `app/main.py::_register_middleware` (add inside
-`RequestContextMiddleware` so 429 responses carry a request id; use the `rate_limited`
-error code already mapped in `app/core/errors.py`). Priorities: `/auth/login`,
-`/auth/token`, `/auth/register` (per IP + per email), `POST /documents` (per user),
-`POST /ask` (per user; each call can cost LLM tokens), `POST /search` and
-`POST /documents/{id}/reprocess` (CPU-bound embedding).
-Redis is already available for counters.
+## What remains to verify after Docker installation
 
-## Observability
+```bash
+# 1. Stack
+docker compose config --quiet
+docker compose build
+docker compose up -d
+docker compose ps                                   # api healthy, migrate exited 0
+docker compose exec api id -u                       # expect 10001
+curl -fsS http://localhost:8000/health/ready        # expect 200, database+redis ok
+curl -fsS http://localhost:8000/metrics | grep dip_http_requests_total
+docker compose exec worker python -c "import urllib.request;print(urllib.request.urlopen('http://localhost:9100/metrics').read()[:300])"
+uv run python scripts/smoke_test.py
 
-- Logs: JSON to stdout (`app/core/logging.py`), request ids propagate to worker logs.
-- DIP2 log events: `search.completed`, `ask.completed`, `ask.insufficient_evidence`,
-  `llm.completed`, `llm.timeout` / `llm.http_error` / `llm.transport_error` / `llm.malformed_response`, `ask.llm_failed`, `search.embedding_failed`, `search.rerank_failed`, `embedding.model_loaded`, job `stage` updates. Token
-  usage fields in `llm.completed` are redacted by the key-name redactor (rename them).
-- Missing: metrics (request latency/status, job durations per stage, queue depth,
-  LLM latency/tokens, insufficient-evidence rate), tracing
-  (OpenTelemetry for FastAPI, SQLAlchemy, Celery), log shipping, alerting.
-- `RequestContextMiddleware` (`app/core/middleware.py`) already measures `duration_ms`
-  per request; a metrics exporter can hook there.
+# 2. Full tests with pgvector >= 0.8 and authenticated Redis
+docker run -d --name dip-test-db -e POSTGRES_USER=dip -e POSTGRES_PASSWORD=dip -e POSTGRES_DB=dip_test -p 5433:5432 pgvector/pgvector:pg16
+docker run -d --name dip-test-redis -p 6380:6379 redis:7-alpine redis-server --requirepass testpass
+export TEST_DATABASE_URL=postgresql+psycopg://dip:dip@localhost:5433/dip_test
+export TEST_REDIS_URL=redis://:testpass@localhost:6380/0
+uv run pytest --cov=app --cov-report=term-missing --cov-fail-under=90   # expect 0 skipped except platform ones
+DATABASE_URL=$TEST_DATABASE_URL uv run alembic downgrade base
+DATABASE_URL=$TEST_DATABASE_URL uv run alembic upgrade head
+DATABASE_URL=$TEST_DATABASE_URL uv run alembic check
 
-## Security hardening areas
+# 3. Redis rate limiter against real Redis (expect 429 on the 6th call)
+for i in 1 2 3 4 5 6; do curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8000/auth/login -H 'Content-Type: application/json' -d '{"email":"x@example.com","password":"wrong-password-1"}'; done
 
-- Request body limit before multipart parsing (proxy `client_max_body_size` or ASGI middleware).
-- Account lockout / login throttling; refresh tokens and revocation (`jti` is already issued).
-- Deeper DOCX validation, malware scanning, PDF sanitising; run parsers in a sandboxed
-  process with memory/CPU limits (pypdf runs inside the worker today).
-- Model supply chain: pin model revisions (commit hashes) and verify them; today the
-  model is fetched by name.
-- Password policy beyond length (12-128 chars today), breached-password check.
-- Security headers (HSTS, CSP for docs pages) at the proxy or middleware.
-- Audit log retention and immutability (DB permissions); PII review of audit metadata
-  (original filenames are stored).
-- Secrets via a secret manager; JWT key rotation (consider asymmetric keys).
-- Redis password is passed on the `redis-server` command line (visible via `docker inspect`);
-  prefer a mounted config file or ACL file.
-- Redis has no TLS; Postgres connections are not TLS either (fine on the compose network only).
-
-## Container security
-
-- Current: two-stage Dockerfile, `python:3.12-slim`, uv-installed locked dependencies,
-  non-root user uid 10001, healthcheck, Postgres/Redis not published to the host.
-- DIP2 adds ~1.3 GB (CPU torch); consider a separate embedding service or ONNX export.
-- Missing: pinned base image digests, image scanning, read-only root filesystem,
-  dropped capabilities / `no-new-privileges` in compose, resource limits, SBOM.
-
-## Docker notes from DIP1 / DIP2
-
-DIP2: on the same box, containers on compose networks could not resolve external hosts
-(`huggingface.co`); the run used a pre-seeded `model_cache` volume with `HF_HUB_OFFLINE=1`.
-Building with `docker compose build` tags `document-intelligence-platform:local`, which
-any other checkout of this project on the same host also uses.
-
-
-The dev box had stale `iptables-legacy` rules (FORWARD policy DROP) that blocked traffic
-between containers on compose networks; it was worked around on that box with
-`iptables-legacy -I DOCKER-USER -i br-+ -o br-+ -j ACCEPT`. This is a host quirk, not a
-project requirement.
+# 4. CI: commit, add a remote, push, and watch .github/workflows/ci.yml (user decision)
+```

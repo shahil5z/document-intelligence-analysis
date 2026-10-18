@@ -33,7 +33,11 @@ def test_symlink_escape_is_rejected(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     storage = LocalStorage(root)
-    (root / "link").symlink_to(outside, target_is_directory=True)
+    try:
+        (root / "link").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        # Windows without Developer Mode / admin rights cannot create symlinks.
+        pytest.skip("symlinks cannot be created on this platform/account")
     with pytest.raises(StorageKeyError):
         storage.save("link/file.txt", [b"x"])
 

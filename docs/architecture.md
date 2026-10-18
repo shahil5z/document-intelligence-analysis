@@ -1,8 +1,30 @@
 # Architecture
 
 Status: DIP1 (backend foundation) + DIP2 (document intelligence: extraction, chunking,
-embeddings, retrieval, `/ask`). Details of DIP2 parts: [document-processing.md](document-processing.md),
-[retrieval.md](retrieval.md), [rag.md](rag.md), [SECURITY.md](SECURITY.md).
+embeddings, retrieval, `/ask`) + DIP3 (production hardening). Details of DIP2 parts: [document-processing.md](document-processing.md),
+[retrieval.md](retrieval.md), [rag.md](rag.md), [SECURITY.md](SECURITY.md). DIP3:
+[observability.md](observability.md), [testing.md](testing.md),
+[deployment.md](deployment.md), [performance.md](performance.md).
+
+## Request path (DIP3)
+
+Middleware, outermost first (`app/main.py::_register_middleware`):
+
+1. `RequestContextMiddleware` - request id, access log, HTTP metrics labelled by route
+   template (`/documents/{document_id}`), never by raw path.
+2. `SecurityHeadersMiddleware` - nosniff, `X-Frame-Options: DENY`,
+   `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`; HSTS in production.
+3. `BodySizeLimitMiddleware` - 413 from `Content-Length` before the app runs; for
+   chunked bodies counts bytes and replaces the response with 413 once the limit is
+   passed. Limit: `MAX_REQUEST_BODY_BYTES` (1 MiB), or `MAX_UPLOAD_SIZE_BYTES` +
+   `UPLOAD_BODY_OVERHEAD_BYTES` for `POST /documents`.
+4. `CORSMiddleware` - configured origins only; exposes `X-Request-ID` and `Retry-After`.
+
+Rate limits are FastAPI dependencies (`app/api/dependencies/rate_limit.py`): per client
+IP for register/login, per normalised email for login, per user id for upload,
+reprocess, search and ask. The limiter (`app/core/rate_limit.py`) is a fixed window in
+Redis (`INCR` + `EXPIRE`, key `dip:rl:{scope}:{window}:{sha256(identifier)}`), fails open
+on Redis errors (counted in `dip_rate_limiter_errors_total`), or in memory for tests.
 
 ## System overview
 
@@ -258,8 +280,10 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 - **Containers**: non-root user (uid 10001); Postgres/Redis are not published to the host.
 - **Retrieval isolation (DIP2)**: chunk queries filter by owner and completed status in
   SQL; `/ask` only sees the caller's chunks.
-- **Not yet**: rate limiting, account lockout, token revocation, refresh tokens, request
-  body limit before multipart parsing, malware scanning, parser sandboxing (see DIP3 handoff).
+- **DIP3**: rate limits, request body limit before parsing, security headers, docs
+  disabled in production, production config checks, compose `cap_drop`/`no-new-privileges`.
+- **Not yet**: account lockout, token revocation, refresh tokens, malware scanning,
+  parser sandboxing, read-only root filesystem, image digest pinning.
 
 ## Observability
 
@@ -270,6 +294,21 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
   request id is passed to the Celery task so worker logs share it.
 - `GET /health` and `GET /health/live` (liveness, no I/O), `GET /health/ready`
   (PostgreSQL `SELECT 1`, authenticated Redis `PING`, 503 if either fails).
+- DIP3: Prometheus metrics at `GET /metrics` (API) and on `WORKER_METRICS_PORT` (worker,
+  multiprocess mode). Metric list: [observability.md](observability.md).
+
+## Worker reliability (DIP3)
+
+- Soft time limit (`CELERY_TASK_SOFT_TIME_LIMIT`, 240 s) raises `SoftTimeLimitExceeded`
+  inside the task; the job fails with "Processing took too long and was stopped".
+- A hard kill (300 s) with `acks_late` + `reject_on_worker_lost` redelivers the message;
+  the claim step fails the job once `attempts` exceeds `max_retries + 1 + 2`, so a file
+  that always kills the worker cannot loop forever.
+- A database error while recording the final state is raised as a transient error, so
+  Celery retries instead of leaving the job silently stuck; terminal jobs are not
+  rewritten on redelivery.
+- `reprocess` locks the document row (`SELECT ... FOR UPDATE`) so two concurrent
+  requests cannot both create a job.
 
 ## Integration points for later stages
 
@@ -280,6 +319,7 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 | DIP2 (done) | `/search`, `/ask`, `/documents/{id}/reprocess` | `app/api/routes/search.py`, `documents.py` |
 | Later | Object storage backend | implement `StorageService`, add to `SUPPORTED_BACKENDS` in `app/storage/factory.py` |
 | Later | OCR for scanned PDFs | fallback in `app/processing/extraction.py::PdfExtractor` |
-| DIP3 | Rate limiting middleware/dependency | `app/main.py::_register_middleware` |
-| DIP3 | Metrics/tracing | `app/core/middleware.py`, `app/core/logging.py` |
-| DIP3 | CI | commands listed in [DIP3_HANDOFF.md](../DIP3_HANDOFF.md) |
+| DIP3 (done) | Rate limiting dependency | `app/api/dependencies/rate_limit.py`, `app/core/rate_limit.py` |
+| DIP3 (done) | Metrics | `app/core/metrics.py`, `app/core/middleware.py`, `app/api/routes/metrics.py` |
+| DIP3 (done, not run) | CI | `.github/workflows/ci.yml` |
+| Later | Tracing | wrap `RequestContextMiddleware` / pipeline steps with OpenTelemetry spans |

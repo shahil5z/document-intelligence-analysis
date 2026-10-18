@@ -6,6 +6,7 @@ import logging
 import uuid
 
 from celery import Task
+from celery.exceptions import SoftTimeLimitExceeded
 
 from app.ai.factory import create_embedding_provider
 from app.core.config import get_settings
@@ -20,6 +21,13 @@ from app.workers.steps import build_indexing_pipeline
 logger = logging.getLogger(__name__)
 
 PROCESS_DOCUMENT_TASK = "documents.process"
+# Claims allowed beyond the normal retry budget, for redeliveries after a worker crash or
+# a hard time limit kill (acks_late + reject_on_worker_lost). Then the job is failed.
+EXTRA_REDELIVERY_ATTEMPTS = 2
+
+
+def max_claim_attempts(max_retries: int) -> int:
+    return max_retries + 1 + EXTRA_REDELIVERY_ATTEMPTS
 
 
 @celery_app.task(
@@ -50,6 +58,8 @@ def process_document(
                 embedder=embedder,
                 token_counter=embedder,
             ),
+            max_attempts=max_claim_attempts(settings.celery_task_max_retries),
+            timeout_errors=(SoftTimeLimitExceeded,),
         )
         retries = int(self.request.retries or 0)
         try:

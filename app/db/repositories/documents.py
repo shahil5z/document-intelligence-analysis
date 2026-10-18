@@ -17,10 +17,13 @@ class DocumentRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get_for_owner(self, document_id: uuid.UUID, owner_id: uuid.UUID) -> Document | None:
-        return self._session.scalar(
-            select(Document).where(Document.id == document_id, Document.owner_id == owner_id)
-        )
+    def get_for_owner(
+        self, document_id: uuid.UUID, owner_id: uuid.UUID, *, for_update: bool = False
+    ) -> Document | None:
+        query = select(Document).where(Document.id == document_id, Document.owner_id == owner_id)
+        if for_update:
+            query = query.with_for_update()
+        return self._session.scalar(query)
 
     def get_by_checksum_for_owner(self, checksum: str, owner_id: uuid.UUID) -> Document | None:
         return self._session.scalar(

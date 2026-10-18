@@ -1,13 +1,15 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.api.dependencies.auth import CurrentUser
+from app.api.dependencies.rate_limit import enforce_rate_limit, limit_by_ip
 from app.api.dependencies.services import AuthServiceDep
 from app.api.responses import error_responses
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserRead
+from app.services.auth_service import normalize_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -18,7 +20,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user",
     description="Creates a regular user account. Self-registration never grants the admin role.",
-    responses=error_responses(409, 422),
+    responses=error_responses(409, 422, 429),
+    dependencies=[Depends(limit_by_ip("register"))],
 )
 def register(body: RegisterRequest, auth: AuthServiceDep) -> UserRead:
     user = auth.register(email=body.email, password=body.password)
@@ -30,9 +33,11 @@ def register(body: RegisterRequest, auth: AuthServiceDep) -> UserRead:
     response_model=TokenResponse,
     summary="Log in with a JSON body",
     description="Exchange email and password for a short-lived JWT access token.",
-    responses=error_responses(401, 403, 422),
+    responses=error_responses(401, 403, 422, 429),
+    dependencies=[Depends(limit_by_ip("login"))],
 )
-def login(body: LoginRequest, auth: AuthServiceDep) -> TokenResponse:
+def login(request: Request, body: LoginRequest, auth: AuthServiceDep) -> TokenResponse:
+    enforce_rate_limit(request, "login_per_email", normalize_email(body.email))
     issued = auth.login(email=body.email, password=body.password)
     return TokenResponse(access_token=issued.access_token, expires_in=issued.expires_in)
 
@@ -45,11 +50,15 @@ def login(body: LoginRequest, auth: AuthServiceDep) -> TokenResponse:
         "OAuth2 password-flow endpoint (form fields `username` = email, `password`). "
         "Used by the Swagger UI *Authorize* dialog; behaves exactly like `/auth/login`."
     ),
-    responses=error_responses(401, 403, 422),
+    responses=error_responses(401, 403, 422, 429),
+    dependencies=[Depends(limit_by_ip("login"))],
 )
 def token(
-    form: Annotated[OAuth2PasswordRequestForm, Depends()], auth: AuthServiceDep
+    request: Request,
+    form: Annotated[OAuth2PasswordRequestForm, Depends()],
+    auth: AuthServiceDep,
 ) -> TokenResponse:
+    enforce_rate_limit(request, "login_per_email", normalize_email(form.username))
     issued = auth.login(email=form.username, password=form.password)
     return TokenResponse(access_token=issued.access_token, expires_in=issued.expires_in)
 

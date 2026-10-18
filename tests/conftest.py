@@ -1,7 +1,9 @@
 """Shared fixtures.
 
-The suite runs against a real PostgreSQL database given by ``TEST_DATABASE_URL``
-(its name must contain "test" because every table is truncated between tests).
+Tests under ``tests/api`` and ``tests/integration`` run against a real PostgreSQL
+database given by ``TEST_DATABASE_URL`` (its name must contain "test" because every table
+is truncated between tests). Without ``TEST_DATABASE_URL`` those tests are *skipped* and
+the unit tests (``tests/unit``, no database, no Redis, no network) still run.
 Celery is replaced by a recording dispatcher, so no Redis is needed.
 """
 
@@ -17,20 +19,25 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
-if not TEST_DATABASE_URL:
-    pytest.exit("TEST_DATABASE_URL must point at a disposable PostgreSQL database", returncode=2)
-if "test" not in (make_url(TEST_DATABASE_URL).database or ""):
+DATABASE_AVAILABLE = bool(TEST_DATABASE_URL)
+# Never connected to: only lets Settings load when no test database is configured.
+_UNAVAILABLE_DATABASE_URL = "postgresql+psycopg://unused@127.0.0.1:1/dip_test_unavailable"
+if DATABASE_AVAILABLE and "test" not in (make_url(TEST_DATABASE_URL).database or ""):
     pytest.exit(
         "Refusing to run: TEST_DATABASE_URL database name must contain 'test'", returncode=2
     )
 
 # Settings are read from the environment on first use, so set them before importing app.*
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL or _UNAVAILABLE_DATABASE_URL
 os.environ["APP_ENV"] = "test"
 os.environ["JWT_SECRET_KEY"] = secrets.token_urlsafe(48)
 os.environ["MAX_UPLOAD_SIZE_BYTES"] = str(64 * 1024)
 os.environ["UPLOAD_CHUNK_SIZE_BYTES"] = "4096"
 os.environ["LOG_LEVEL"] = "WARNING"
+# Rate limiting is exercised by dedicated tests with their own app/settings; the rest
+# of the suite must not depend on request counts. Memory backend: no Redis needed.
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+os.environ["RATE_LIMIT_BACKEND"] = "memory"
 
 from alembic.config import Config  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
@@ -78,9 +85,11 @@ class RecordingDispatcher:
         self.calls.append({"document_id": document_id, "job_id": job_id, "task_id": task_id})
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def _migrated_database() -> None:
     """Build the schema with the real Alembic migrations (downgrade first for a clean slate)."""
+    if not DATABASE_AVAILABLE:
+        pytest.skip("needs PostgreSQL: set TEST_DATABASE_URL (see docs/testing.md)")
     config = Config(str(PROJECT_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
     config.cmd_opts = None
@@ -88,8 +97,9 @@ def _migrated_database() -> None:
     command.upgrade(config, "head")
 
 
-@pytest.fixture(autouse=True)
-def _clean_tables() -> Iterator[None]:
+@pytest.fixture
+def database(_migrated_database: None) -> Iterator[None]:
+    """A migrated test database; every table is truncated after the test."""
     yield
     engine = create_engine(TEST_DATABASE_URL)
     with engine.begin() as connection:
@@ -98,7 +108,7 @@ def _clean_tables() -> Iterator[None]:
 
 
 @pytest.fixture
-def db_session() -> Iterator[Session]:
+def db_session(database: None) -> Iterator[Session]:
     session = get_session_factory()()
     try:
         yield session
@@ -135,6 +145,7 @@ def test_settings() -> Settings:
 
 @pytest.fixture
 def app(
+    database: None,
     storage: LocalStorage,
     dispatcher: RecordingDispatcher,
     embedder: HashingEmbeddingProvider,

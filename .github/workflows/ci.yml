@@ -1,0 +1,126 @@
+# CI: lint/type checks, tests against real PostgreSQL (pgvector) + Redis, migration drift,
+# dependency audit and a Docker build. No secrets are needed: test credentials are
+# generated per run and the suite uses a hashing embedder and a mock LLM (no network,
+# no model download, no OPENAI_API_KEY).
+name: ci
+
+on:
+  push:
+    branches: [main, dip2, dip3]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.13.1"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: ruff + mypy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+
+  test:
+    name: pytest (PostgreSQL + Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: dip
+          POSTGRES_PASSWORD: ci-only-postgres-password
+          POSTGRES_DB: dip_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dip -d dip_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Redis with a password (service containers cannot pass --requirepass)
+        run: |
+          REDIS_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$REDIS_PASSWORD"
+          echo "TEST_REDIS_URL=redis://:${REDIS_PASSWORD}@localhost:6379/0" >> "$GITHUB_ENV"
+          docker run -d --name redis -p 6379:6379 redis:7-alpine \
+            redis-server --requirepass "$REDIS_PASSWORD"
+          for i in $(seq 1 30); do
+            docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" redis redis-cli ping | grep -q PONG && break
+            sleep 1
+          done
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - name: pytest with coverage
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://dip:ci-only-postgres-password@localhost:5432/dip_test
+        run: uv run pytest --cov=app --cov-report=term --cov-report=xml --cov-fail-under=90
+      - name: Migrations apply cleanly and match the models
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://dip:ci-only-postgres-password@localhost:5432/dip_test
+          JWT_SECRET_KEY: ci-only-jwt-secret-that-is-long-enough-123456
+        run: |
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+          uv run alembic check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Audit locked dependencies (torch CPU wheels are not on PyPI and are skipped)
+        run: |
+          uv export --frozen --no-hashes --no-emit-project --all-groups -o requirements-audit.txt
+          uvx pip-audit -r requirements-audit.txt --no-deps --disable-pip --progress-spinner off
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (not pushed)
+        run: docker build --tag document-intelligence-platform:ci .
+      - name: Image runs as non-root and the app imports without heavy models
+        run: |
+          test "$(docker run --rm --entrypoint id document-intelligence-platform:ci -u)" = "10001"
+          docker run --rm -e APP_ENV=test -e JWT_SECRET_KEY=ci-only-jwt-secret-that-is-long-enough-123456 \
+            -e DATABASE_URL=postgresql+psycopg://u@127.0.0.1:1/dip_test \
+            document-intelligence-platform:ci python -c "import app.main"
+      - name: Compose file is valid
+        run: |
+          JWT_SECRET_KEY=x POSTGRES_PASSWORD=x REDIS_PASSWORD=x docker compose config --quiet

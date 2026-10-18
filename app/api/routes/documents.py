@@ -1,10 +1,11 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, File, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 
 from app.api.dependencies.auth import CurrentUser
 from app.api.dependencies.pagination import Pagination
+from app.api.dependencies.rate_limit import limit_by_user
 from app.api.dependencies.services import DocumentServiceDep
 from app.api.responses import error_responses
 from app.schemas.common import Page
@@ -30,7 +31,8 @@ router = APIRouter(prefix="/documents", tags=["documents"])
         "limit is enforced while streaming to storage, and a processing job is queued. "
         "Uploading identical content twice returns 409."
     ),
-    responses=error_responses(400, 401, 409, 413, 415, 422),
+    responses=error_responses(400, 401, 409, 413, 415, 422, 429),
+    dependencies=[Depends(limit_by_user("upload"))],
 )
 def upload_document(
     user: CurrentUser,
@@ -113,7 +115,8 @@ def get_document_status(
         "after a failed run or a chunking change). The document is not searchable until "
         "the new job completes. 409 while it is queued or processing."
     ),
-    responses=error_responses(401, 404, 409, 422),
+    responses=error_responses(401, 404, 409, 422, 429),
+    dependencies=[Depends(limit_by_user("reprocess"))],
 )
 def reprocess_document(
     document_id: uuid.UUID, user: CurrentUser, documents: DocumentServiceDep

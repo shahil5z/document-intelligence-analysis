@@ -98,6 +98,15 @@ class InvalidQueryError(AppError):
     message = "Invalid query"
 
 
+class RateLimitedError(AppError):
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "rate_limited"
+    message = "Too many requests; retry later"
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__(headers={"Retry-After": str(max(1, retry_after_seconds))})
+
+
 class ServiceUnavailableError(AppError):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     code = "service_unavailable"
@@ -156,6 +165,15 @@ async def _handle_validation_error(_: Request, exc: Exception) -> JSONResponse:
         "validation_error",
         "Request validation failed",
         details=details,
+    )
+
+
+def payload_too_large_response(limit: int) -> JSONResponse:
+    """413 sent by the body-size middleware before (or instead of) the route's response."""
+    return _response(
+        status.HTTP_413_CONTENT_TOO_LARGE,
+        "payload_too_large",
+        f"Request body exceeds the maximum allowed size of {limit} bytes",
     )
 
 

@@ -1,6 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.dependencies.auth import CurrentUser
+from app.api.dependencies.rate_limit import limit_by_user
 from app.api.dependencies.services import AnswerServiceDep, SearchServiceDep
 from app.api.responses import error_responses
 from app.schemas.search import (
@@ -26,7 +27,8 @@ SNIPPET_CHARS = 300
         "(pgvector cosine), `keyword` (PostgreSQL full-text, ts_rank) or `hybrid` "
         "(Reciprocal Rank Fusion of both, default). Does not call a language model."
     ),
-    responses=error_responses(401, 404, 422, 503),
+    responses=error_responses(401, 404, 422, 429, 503),
+    dependencies=[Depends(limit_by_user("search"))],
 )
 def search(body: SearchRequest, user: CurrentUser, service: SearchServiceDep) -> SearchResponse:
     result = service.search(
@@ -72,7 +74,8 @@ def search(body: SearchRequest, user: CurrentUser, service: SearchServiceDep) ->
         "reaches the evidence threshold, an insufficient-evidence answer is returned "
         "without calling the LLM. 503 if the LLM is unavailable or not configured."
     ),
-    responses=error_responses(401, 404, 422, 503),
+    responses=error_responses(401, 404, 422, 429, 503),
+    dependencies=[Depends(limit_by_user("ask"))],
 )
 def ask(body: AskRequest, user: CurrentUser, service: AnswerServiceDep) -> AskResponse:
     result = service.ask(

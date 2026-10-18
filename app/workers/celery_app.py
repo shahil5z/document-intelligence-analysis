@@ -1,13 +1,17 @@
 """Celery application. Configuration comes from the same Settings as the API."""
 
+import logging
+import os
 from typing import Any
 
 from celery import Celery
-from celery.signals import setup_logging
+from celery.signals import setup_logging, worker_process_shutdown, worker_ready
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.storage.factory import check_storage_backend
+
+logger = logging.getLogger(__name__)
 
 
 def create_celery_app() -> Celery:
@@ -30,8 +34,8 @@ def create_celery_app() -> Celery:
         task_acks_late=True,
         task_reject_on_worker_lost=True,
         worker_prefetch_multiplier=1,
-        task_soft_time_limit=240,
-        task_time_limit=300,
+        task_soft_time_limit=settings.celery_task_soft_time_limit,
+        task_time_limit=settings.celery_task_time_limit,
         result_expires=24 * 60 * 60,
         broker_connection_retry_on_startup=True,
         broker_connection_timeout=5,
@@ -47,6 +51,30 @@ def create_celery_app() -> Celery:
 @setup_logging.connect
 def _configure_worker_logging(**_: Any) -> None:
     configure_logging(get_settings().log_level)
+
+
+@worker_ready.connect
+def _start_metrics_exporter(**_: Any) -> None:
+    """Serve worker metrics on WORKER_METRICS_PORT (main worker process only)."""
+    port = get_settings().worker_metrics_port
+    if port is None:
+        return
+    from prometheus_client import start_http_server  # noqa: PLC0415
+
+    from app.core.metrics import build_registry  # noqa: PLC0415
+
+    if not os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        logger.warning("worker.metrics_without_multiproc_dir")
+    start_http_server(port, registry=build_registry())
+    logger.info("worker.metrics_exporter_started", extra={"port": port})
+
+
+@worker_process_shutdown.connect
+def _mark_metrics_process_dead(pid: int | None = None, **_: Any) -> None:
+    if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        from prometheus_client import multiprocess  # noqa: PLC0415
+
+        multiprocess.mark_process_dead(pid or os.getpid())  # type: ignore[no-untyped-call]
 
 
 celery_app = create_celery_app()

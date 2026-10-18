@@ -16,6 +16,7 @@ from app.ai.base import LLMProvider
 from app.ai.errors import LLMError
 from app.core.config import Settings
 from app.core.errors import ServiceUnavailableError
+from app.core.metrics import ASK_REQUESTS
 from app.db.models import User
 from app.domain.enums import SearchMode
 from app.processing.chunking import TokenCounter
@@ -118,6 +119,7 @@ class AnswerService:
             if item.hit.similarity is not None and item.hit.similarity >= threshold
         ]
         if not evidence:
+            ASK_REQUESTS.labels("insufficient_evidence").inc()
             logger.info(
                 "ask.insufficient_evidence",
                 extra={"retrieved": len(retrieved), "threshold": threshold, "llm_called": False},
@@ -134,15 +136,18 @@ class AnswerService:
             evidence, max_tokens=self._settings.max_context_tokens, counter=self._counter
         )
         if self._llm is None:
+            ASK_REQUESTS.labels("not_configured").inc()
             raise ServiceUnavailableError(LLM_NOT_CONFIGURED_MESSAGE)
         try:
             raw = self._llm.complete(build_messages(question, sources))
         except LLMError as exc:
+            ASK_REQUESTS.labels("llm_unavailable").inc()
             logger.warning("ask.llm_failed", extra={"error_type": type(exc).__name__})
             raise ServiceUnavailableError(LLM_UNAVAILABLE_MESSAGE) from exc
 
         model = self._llm.model_name
         if raw.strip().startswith(INSUFFICIENT_EVIDENCE_SENTINEL) or not raw.strip():
+            ASK_REQUESTS.labels("insufficient_evidence").inc()
             logger.info(
                 "ask.insufficient_evidence",
                 extra={"retrieved": len(retrieved), "llm_called": True},
@@ -162,6 +167,7 @@ class AnswerService:
             warnings.append("invalid_citations_removed")
         if not labels:
             warnings.append("answer_has_no_citations")
+        ASK_REQUESTS.labels("answered").inc()
         logger.info(
             "ask.completed",
             extra={

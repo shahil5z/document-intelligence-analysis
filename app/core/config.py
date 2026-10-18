@@ -16,6 +16,8 @@ from pydantic import Field, SecretStr, ValidationError, field_validator, model_v
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine import URL
 
+from app.core.rate_limit import parse_rate
+
 MIN_JWT_SECRET_LENGTH = 32
 _PLACEHOLDER_PREFIXES = ("replace-with", "change-me", "changeme")
 
@@ -147,6 +149,34 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_context_tokens: int = Field(default=3000, ge=100, le=100_000)
 
+    # --- DIP3: hardening, rate limiting, observability ----------------------------------
+    # Swagger UI / ReDoc / openapi.json. None = enabled except when APP_ENV=production.
+    api_docs_enabled: bool | None = None
+    # Upper bound for any request body except uploads (JSON and form logins).
+    max_request_body_bytes: int = Field(default=1024 * 1024, ge=1024)
+    # Multipart framing allowance on top of MAX_UPLOAD_SIZE_BYTES for POST /documents.
+    upload_body_overhead_bytes: int = Field(default=64 * 1024, ge=0, le=10 * 1024 * 1024)
+    security_headers_enabled: bool = True
+
+    rate_limit_enabled: bool = True
+    # "redis": shared counters (required in production). "memory": per process (dev/tests).
+    rate_limit_backend: Literal["redis", "memory"] = "redis"
+    rate_limit_register: str = "5/minute"
+    rate_limit_login: str = "10/minute"
+    rate_limit_login_per_email: str = "5/minute"
+    rate_limit_upload: str = "30/minute"
+    rate_limit_search: str = "60/minute"
+    rate_limit_ask: str = "20/minute"
+    rate_limit_reprocess: str = "10/minute"
+
+    metrics_enabled: bool = True
+    # Worker-side Prometheus exporter port (None = off). Needs PROMETHEUS_MULTIPROC_DIR
+    # with the prefork pool; see docs/observability.md.
+    worker_metrics_port: int | None = Field(default=None, ge=1, le=65535)
+
+    celery_task_soft_time_limit: int = Field(default=240, ge=1)
+    celery_task_time_limit: int = Field(default=300, ge=1)
+
     @field_validator("allowed_extensions", mode="before")
     @classmethod
     def _parse_extensions(cls, value: object) -> object:
@@ -167,6 +197,20 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_origins(cls, value: object) -> object:
         return _split_csv(value)
+
+    @field_validator(
+        "rate_limit_register",
+        "rate_limit_login",
+        "rate_limit_login_per_email",
+        "rate_limit_upload",
+        "rate_limit_search",
+        "rate_limit_ask",
+        "rate_limit_reprocess",
+    )
+    @classmethod
+    def _validate_rate(cls, value: str) -> str:
+        parse_rate(value)
+        return value.strip().lower()
 
     @field_validator("cors_allowed_origins")
     @classmethod
@@ -196,6 +240,8 @@ class Settings(BaseSettings):
         return value.strip().lower()
 
     @field_validator(
+        "api_docs_enabled",
+        "worker_metrics_port",
         "openai_api_key",
         "postgres_password",
         "redis_password",
@@ -225,8 +271,15 @@ class Settings(BaseSettings):
                         f"{name.upper()} still has its .env.example placeholder value; "
                         "run scripts/generate_env.py"
                     )
-        if self.app_env is Environment.PRODUCTION and self.debug:
-            problems.append("DEBUG must be false when APP_ENV=production")
+        if self.app_env is Environment.PRODUCTION:
+            problems.extend(self._production_problems())
+        problems.extend(self._consistency_problems())
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
+
+    def _consistency_problems(self) -> list[str]:
+        problems: list[str] = []
         if self.chunk_overlap >= self.chunk_size:
             problems.append("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
         if self.top_k > self.max_top_k:
@@ -235,9 +288,31 @@ class Settings(BaseSettings):
             problems.append("CANDIDATE_K must be at least MAX_TOP_K")
         if not self.llm_base_url.startswith(("https://", "http://")):
             problems.append("LLM_BASE_URL must be an http(s) URL")
-        if problems:
-            raise ValueError("; ".join(problems))
-        return self
+        if self.celery_task_soft_time_limit >= self.celery_task_time_limit:
+            problems.append("CELERY_TASK_SOFT_TIME_LIMIT must be below CELERY_TASK_TIME_LIMIT")
+        return problems
+
+    def _production_problems(self) -> list[str]:
+        """Extra rules for APP_ENV=production (messages name settings, never values)."""
+        problems: list[str] = []
+        if self.debug:
+            problems.append("DEBUG must be false when APP_ENV=production")
+        insecure = [o for o in self.cors_allowed_origins if not o.startswith("https://")]
+        if insecure:
+            problems.append("CORS_ALLOWED_ORIGINS must only contain https:// origins in production")
+        if self.llm_provider == "openai" and not self.llm_base_url.startswith("https://"):
+            problems.append("LLM_BASE_URL must use https:// in production")
+        if self.rate_limit_enabled and self.rate_limit_backend == "memory":
+            problems.append("RATE_LIMIT_BACKEND=memory is per-process; use redis in production")
+        if self.log_level == "DEBUG":
+            problems.append("LOG_LEVEL=DEBUG is not allowed in production")
+        return problems
+
+    @property
+    def docs_enabled(self) -> bool:
+        if self.api_docs_enabled is not None:
+            return self.api_docs_enabled
+        return self.app_env is not Environment.PRODUCTION
 
     @property
     def is_production(self) -> bool:

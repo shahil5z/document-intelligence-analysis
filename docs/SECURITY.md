@@ -1,4 +1,4 @@
-# Security notes (DIP1 + DIP2)
+# Security notes (DIP1 + DIP2 + DIP3)
 
 DIP1 controls (auth, upload validation, storage guard, secrets handling, Redis AUTH,
 CORS, non-root containers) are described in [architecture.md](architecture.md#security-boundaries).
@@ -70,8 +70,32 @@ document containing an injection payload and a mock model that emits a fake cita
 
 ## Abuse / cost
 
-- `/ask` can trigger one LLM call per request; there is no rate limiting or per-user
-  quota yet (DIP3). `MAX_QUERY_LENGTH`, `MAX_TOP_K`, `MAX_CONTEXT_TOKENS` and
+- `/ask` can trigger one LLM call per request; DIP3 limits it per user
+  (`RATE_LIMIT_ASK`, default 20/minute). There is no daily quota or cost budget.
+  `MAX_QUERY_LENGTH`, `MAX_TOP_K`, `MAX_CONTEXT_TOKENS` and
   `LLM_MAX_OUTPUT_TOKENS` bound the size of each call.
 - Search embeds the query on the API process CPU; heavy query load competes with
-  request handling (**Not measured**).
+  request handling (**Not measured**). Search is limited per user (`RATE_LIMIT_SEARCH`).
+
+## DIP3 hardening
+
+| Control | Where | Test |
+| --- | --- | --- |
+| Request body limit before parsing (413) | `app/core/middleware.py::BodySizeLimitMiddleware` | `tests/unit/test_http_hardening.py`, `tests/api/test_security_matrix.py` |
+| Rate limits per IP / email / user, 429 + `Retry-After` | `app/api/dependencies/rate_limit.py` | `tests/unit/test_http_hardening.py`, `tests/unit/test_rate_limit.py` |
+| Rate-limit keys contain a SHA-256 of the identifier, never the email or IP | `app/core/rate_limit.py` | `tests/unit/test_rate_limit.py` |
+| Security headers; HSTS only in production | `SecurityHeadersMiddleware` | `test_http_hardening.py` |
+| Swagger/ReDoc/OpenAPI off in production unless `API_DOCS_ENABLED=true` | `app/main.py`, `Settings.docs_enabled` | `test_http_hardening.py` |
+| Production refuses: `DEBUG=true`, `LOG_LEVEL=DEBUG`, non-https CORS origins, http `LLM_BASE_URL` with `openai`, in-memory rate limiter | `app/core/config.py::_production_problems` | `tests/unit/test_production_config.py` |
+| Unhandled errors return a generic 500 without exception text | `app/core/errors.py` | `test_http_hardening.py` |
+| Cross-user matrix (GET/status/reprocess/delete/search/ask) returns 404 / empty | owner filters | `tests/api/test_security_matrix.py` |
+| Tampered JWT role claim and deleted user's token -> 401 | `app/core/security.py`, `app/api/dependencies/auth.py` | `test_security_matrix.py` |
+| Hostile filenames sanitised; storage key is server-generated | `app/services/upload_validation.py` | `test_security_matrix.py` |
+| Prompt injection text stays inside escaped `<untrusted_sources>`; forged citations removed | `app/services/rag_prompt.py`, `app/services/answer_service.py` | `tests/unit/test_answer_service.py` |
+| Compose: `cap_drop: [ALL]`, `no-new-privileges`, `init` for migrate/api/worker | `docker-compose.yml` | static only, **NOT VERIFIED** (no Docker) |
+
+Remaining gaps: rate limits fail open when Redis is down (availability over strictness);
+fixed windows allow short bursts; upload rate limiting runs after the body is received;
+the Redis password is visible in the `redis-server` command line; images are tag-pinned,
+not digest-pinned; no image vulnerability scan; containers do not use a read-only root
+filesystem.

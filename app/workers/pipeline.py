@@ -8,11 +8,13 @@ assembled by ``build_indexing_pipeline``); intermediate results live in
 """
 
 import hashlib
+import time
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from app.core.metrics import STAGE_DURATION
 from app.storage.base import StorageService
 
 if TYPE_CHECKING:
@@ -86,7 +88,11 @@ class DocumentPipeline:
         for step in self._steps:
             if on_step is not None:
                 on_step(step.name)
-            step.run(context)
+            started = time.perf_counter()
+            try:
+                step.run(context)
+            finally:
+                STAGE_DURATION.labels(step.name).observe(time.perf_counter() - started)
 
 
 def build_default_pipeline() -> DocumentPipeline:

@@ -1,3 +1,4 @@
+import os
 import re
 import stat
 from pathlib import Path
@@ -37,7 +38,8 @@ def test_generates_random_url_safe_secrets(tmp_path: Path) -> None:
     assert values["OPENAI_API_KEY"] == "replace-with-your-openai-api-key"
     # Every other line of the template is preserved.
     assert set(values) == set(_parse(EXAMPLE))
-    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    if os.name == "posix":  # Windows has no POSIX permission bits (see README, Windows notes)
+        assert stat.S_IMODE(out.stat().st_mode) == 0o600
 
 
 def test_two_runs_produce_different_secrets(tmp_path: Path) -> None:

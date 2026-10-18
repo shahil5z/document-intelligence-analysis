@@ -1,6 +1,7 @@
 """Framework-independent job execution used by the Celery task (and directly by tests)."""
 
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -9,6 +10,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.metrics import JOB_DURATION, JOBS
 from app.db.models import Document, DocumentProcessingJob
 from app.db.repositories.documents import DocumentRepository
 from app.db.repositories.jobs import ProcessingJobRepository
@@ -27,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 RETRIES_EXHAUSTED_MESSAGE = "Processing failed after several attempts"
 UNEXPECTED_ERROR_MESSAGE = "Processing failed due to an internal error"
+TIMEOUT_MESSAGE = "Processing took too long and was stopped"
 
 
 class JobOutcome(StrEnum):
@@ -36,22 +39,49 @@ class JobOutcome(StrEnum):
 
 
 class DocumentProcessor:
+    """Runs one attempt of a processing job.
+
+    ``max_attempts`` bounds how often a job may be *claimed* (normal retries plus
+    redeliveries after worker crashes or hard time limits); beyond it the job is failed
+    instead of being redelivered forever. ``timeout_errors`` are exception types raised
+    by the task runner on a soft time limit (Celery's ``SoftTimeLimitExceeded``); they
+    fail the job with a clear message instead of "internal error".
+    """
+
     def __init__(
         self,
         session_factory: sessionmaker[Session],
         storage: StorageService,
         pipeline: DocumentPipeline,
+        *,
+        max_attempts: int | None = None,
+        timeout_errors: tuple[type[BaseException], ...] = (),
     ) -> None:
         self._session_factory = session_factory
         self._storage = storage
         self._pipeline = pipeline
+        self._max_attempts = max_attempts
+        self._timeout_errors = timeout_errors
 
     def run(self, *, job_id: uuid.UUID, is_final_attempt: bool) -> JobOutcome:
         """Execute one attempt.
 
-        Raises ``TransientProcessingError`` when the caller should retry; every other
-        failure is recorded on the job and reported as ``JobOutcome.FAILED``.
+        Raises ``TransientProcessingError`` when the caller should retry (including when
+        the final job state could not be written); every other failure is recorded on
+        the job and reported as ``JobOutcome.FAILED``.
         """
+        started = time.perf_counter()
+        try:
+            outcome = self._run(job_id=job_id, is_final_attempt=is_final_attempt)
+        except TransientProcessingError:
+            JOBS.labels("retry").inc()
+            raise
+        finally:
+            JOB_DURATION.observe(time.perf_counter() - started)
+        JOBS.labels(outcome.value).inc()
+        return outcome
+
+    def _run(self, *, job_id: uuid.UUID, is_final_attempt: bool) -> JobOutcome:
         try:
             context = self._claim(job_id)
         except OperationalError as exc:
@@ -73,7 +103,11 @@ class DocumentProcessor:
             logger.warning("job.retry_scheduled", extra={"job_id": str(job_id)})
             self._mark_retrying(job_id)
             raise TransientProcessingError(type(exc).__name__) from exc
-        except Exception:
+        except Exception as exc:
+            if self._timeout_errors and isinstance(exc, self._timeout_errors):
+                logger.warning("job.timed_out", extra={"job_id": str(job_id)})
+                self._finish(job_id, JobStatus.FAILED, TIMEOUT_MESSAGE)
+                return JobOutcome.FAILED
             logger.exception("job.unexpected_error", extra={"job_id": str(job_id)})
             self._finish(job_id, JobStatus.FAILED, UNEXPECTED_ERROR_MESSAGE)
             return JobOutcome.FAILED
@@ -95,6 +129,22 @@ class DocumentProcessor:
                 return None
             document = DocumentRepository(session).get_unscoped(job.document_id)
             if document is None:
+                return None
+            if self._max_attempts is not None and job.attempts >= self._max_attempts:
+                # Redelivered again after crashes / hard time limits: stop the loop.
+                logger.error(
+                    "job.max_attempts_exceeded",
+                    extra={"job_id": str(job_id), "attempts": job.attempts},
+                )
+                if job.status is not JobStatus.PROCESSING:
+                    transition_job(job, JobStatus.PROCESSING)
+                transition_job(job, JobStatus.FAILED)
+                job.completed_at = datetime.now(UTC)
+                job.error_message = RETRIES_EXHAUSTED_MESSAGE
+                if document.status is not DocumentStatus.PROCESSING:
+                    transition_document(document, DocumentStatus.PROCESSING)
+                transition_document(document, DocumentStatus.FAILED)
+                session.commit()
                 return None
             if job.status is JobStatus.PROCESSING:
                 # Redelivery after a worker crash (acks_late) or an unpersisted retry state.
@@ -145,22 +195,32 @@ class DocumentProcessor:
         return job, document
 
     def _finish(self, job_id: uuid.UUID, status: JobStatus, error_message: str | None) -> None:
-        with session_scope(self._session_factory) as session:
-            loaded = self._load(session, job_id)
-            if loaded is None:
-                # The document was deleted while processing; nothing left to update.
-                return
-            job, document = loaded
-            transition_job(job, status)
-            job.completed_at = datetime.now(UTC)
-            job.error_message = error_message
-            transition_document(
-                document,
-                DocumentStatus.COMPLETED
-                if status is JobStatus.COMPLETED
-                else DocumentStatus.FAILED,
-            )
-            session.commit()
+        """Write the final state. A database outage here becomes a retry (the redelivered
+        attempt reclaims the ``processing`` job and re-runs the idempotent pipeline)
+        instead of an unhandled error that would leave the job ``processing`` forever."""
+        try:
+            with session_scope(self._session_factory) as session:
+                loaded = self._load(session, job_id)
+                if loaded is None:
+                    # The document was deleted while processing; nothing left to update.
+                    return
+                job, document = loaded
+                if job.status in TERMINAL_JOB_STATUSES:
+                    logger.warning("job.already_finished", extra={"job_id": str(job_id)})
+                    return
+                transition_job(job, status)
+                job.completed_at = datetime.now(UTC)
+                job.error_message = error_message
+                transition_document(
+                    document,
+                    DocumentStatus.COMPLETED
+                    if status is JobStatus.COMPLETED
+                    else DocumentStatus.FAILED,
+                )
+                session.commit()
+        except OperationalError as exc:
+            logger.warning("job.finish_not_persisted", extra={"job_id": str(job_id)})
+            raise TransientProcessingError("database unavailable while finishing job") from exc
 
     def _mark_retrying(self, job_id: uuid.UUID) -> None:
         try:

@@ -11,6 +11,7 @@ from app.ai.base import EmbeddingProvider, Reranker
 from app.ai.errors import AIProviderConfigurationError, EmbeddingError
 from app.core.config import Settings
 from app.core.errors import InvalidQueryError, NotFoundError, ServiceUnavailableError
+from app.core.metrics import SEARCH_LATENCY
 from app.db.models import User
 from app.db.repositories.chunks import ChunkRepository
 from app.db.repositories.documents import DocumentRepository
@@ -132,6 +133,8 @@ class SearchService:
                 logger.warning("search.rerank_failed", extra={"error_type": type(exc).__name__})
 
         results = ranked[:limit]
+        elapsed = time.perf_counter() - started
+        SEARCH_LATENCY.labels(mode.value).observe(elapsed)
         logger.info(
             "search.completed",
             extra={
@@ -141,7 +144,7 @@ class SearchService:
                 "query_length": len(query),
                 "document_filter": document_id is not None,
                 "reranked": reranked,
-                "duration_ms": round((time.perf_counter() - started) * 1000),
+                "duration_ms": round(elapsed * 1000),
             },
         )
         return SearchResult(mode=mode, results=results, reranked=reranked)

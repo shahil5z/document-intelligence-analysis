@@ -13,6 +13,7 @@ _DESCRIPTIONS = {
     413: "Uploaded file too large",
     415: "Unsupported file type",
     422: "Request validation failed",
+    429: "Rate limit exceeded (see the Retry-After header)",
     503: "A dependency is unavailable",
 }
 

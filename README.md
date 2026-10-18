@@ -7,7 +7,7 @@ The project is built in three stages:
 | --- | --- | --- |
 | **DIP1** | Foundation: auth, uploads, storage, async job pipeline, audit log, ops basics, Docker | **Implemented** |
 | **DIP2** | Text extraction, chunking, local embeddings (pgvector), semantic / keyword / hybrid search, `/ask` with validated citations | **Implemented** (OCR not implemented) - see [DIP2_HANDOFF.md](DIP2_HANDOFF.md) |
-| **DIP3** | CI/CD, rate limiting, metrics/tracing, container hardening, final docs | Planned |
+| **DIP3** | Production hardening: rate limiting, body limits, security headers, Prometheus metrics, worker reliability, compose hardening, CI workflow, docs | **Implemented locally**; Docker-dependent parts **not verified** (no Docker on the dev machine) - see [DIP3_HANDOFF.md](DIP3_HANDOFF.md) |
 
 ## Why
 
@@ -68,6 +68,12 @@ chat API) · uv · pytest · ruff · mypy (strict) · Docker / Docker Compose.
 | Audit log for register, login, failed login, upload, delete | Implemented, tested |
 | JSON logs, `X-Request-ID`, consistent error envelope, `/health`, `/health/live`, `/health/ready` | Implemented, tested |
 | Password-protected Redis; secrets validated at startup, never logged | Implemented, tested |
+| Rate limits (fixed window, Redis or in-memory): register/login per IP, login per email, upload/reprocess/search/ask per user; 429 + `Retry-After`; fails open if Redis is down | Implemented, tested (DIP3) |
+| Request body limit before parsing (1 MiB JSON, upload limit + 64 KiB for `POST /documents`), 413 envelope | Implemented, tested (DIP3) |
+| Security headers, HSTS in production, API docs off in production, production config checks (https CORS / LLM URL, no memory rate limiter, no DEBUG) | Implemented, tested (DIP3) |
+| Prometheus `/metrics` (route-template labels, upload/search/ask/LLM/job/stage metrics), worker exporter on `WORKER_METRICS_PORT` | API metrics tested and run live; worker exporter **not verified** |
+| Worker reliability: soft time limit -> clear failure, bounded redelivery, DB outage on finish -> retry, row lock against duplicate reprocess | Implemented, tested (DIP3) |
+| GitHub Actions CI (`.github/workflows/ci.yml`) | Written and YAML-validated; **never run** (no remote) |
 | OCR for scanned PDFs / images | **Not implemented** (scans fail with an explicit message) |
 | Retrieval evaluation (Recall@k, Precision@k, MRR) on a small synthetic set | Script + results in [docs/retrieval.md](docs/retrieval.md#evaluation) |
 
@@ -163,7 +169,9 @@ docker compose exec api python -m app.cli create-admin --email admin@example.com
 - Celery's default prefork pool is not supported on Windows; add `--pool=solo` to the
   worker command when running it on the host.
 - PowerShell syntax for test variables: `$env:TEST_DATABASE_URL = "postgresql+psycopg://..."`.
-- These Windows notes were not executed during DIP1 (development and verification ran on Linux).
+- DIP3 ran the test suite on Windows 11 with Python 3.12 against a local PostgreSQL 16 +
+  pgvector 0.6.2 (no Docker). POSIX-only tests (file mode `0600`, symlinks without
+  privilege) are skipped there. Docker Desktop and the Celery worker were not run.
 
 ## Environment variables
 
@@ -206,6 +214,13 @@ All names below appear in `.env.example`; values there are placeholders.
 | `LLM_TIMEOUT_SECONDS` | `30` | hard HTTP timeout |
 | `MAX_CONTEXT_TOKENS` | `3000` | approximate token budget for retrieved context |
 | `TEST_DATABASE_URL` / `TEST_REDIS_URL` | - | tests only (commented out in `.env.example`) |
+| `API_DOCS_ENABLED` | unset (on, off in production) | Swagger/ReDoc/OpenAPI |
+| `MAX_REQUEST_BODY_BYTES` / `UPLOAD_BODY_OVERHEAD_BYTES` | `1048576` / `65536` | body limits enforced before parsing |
+| `SECURITY_HEADERS_ENABLED` | `true` | nosniff, frame deny, no-referrer, CORP; HSTS only in production |
+| `RATE_LIMIT_ENABLED` / `RATE_LIMIT_BACKEND` | `true` / `redis` | `memory` is per process and rejected in production |
+| `RATE_LIMIT_REGISTER` / `_LOGIN` / `_LOGIN_PER_EMAIL` / `_UPLOAD` / `_SEARCH` / `_ASK` / `_REPROCESS` | `5/minute` / `10/minute` / `5/minute` / `30/minute` / `60/minute` / `20/minute` / `10/minute` | format `N/second`, `N/minute`, `N/hour` or `N/day` |
+| `METRICS_ENABLED` / `WORKER_METRICS_PORT` | `true` / unset | `/metrics` on the API; worker exporter port (compose: 9100, internal only) |
+| `CELERY_TASK_SOFT_TIME_LIMIT` / `CELERY_TASK_TIME_LIMIT` | `240` / `300` | seconds; soft must be lower |
 
 Further tunables with safe defaults (not in `.env.example`): `DB_POOL_SIZE`,
 `DB_MAX_OVERFLOW`, `CELERY_TASK_MAX_RETRIES`, `CELERY_RETRY_BACKOFF_SECONDS`,
@@ -234,8 +249,10 @@ revision; add a new one.
 
 ## Tests and quality checks
 
-Tests need a disposable PostgreSQL database (the suite runs the Alembic migrations and
-truncates tables after each test). Celery is replaced by a recording fake, the embedding
+Unit tests run without any services: `uv run pytest` with no `TEST_DATABASE_URL` runs
+the unit tests and skips the database-backed API/integration tests (DIP3 measurement:
+216 passed, 117 skipped). The full suite needs a disposable PostgreSQL + pgvector
+database (it runs the Alembic migrations and truncates tables after each test). Celery is replaced by a recording fake, the embedding
 model by a deterministic hashing embedder and the LLM by a mock, so neither Redis, model
 downloads nor network access are required. Two readiness tests
 additionally run when `TEST_REDIS_URL` points at a Redis (one needs a password in it).
@@ -249,7 +266,9 @@ uv run pytest --cov=app
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
-Last recorded run: see [DIP2_HANDOFF.md](DIP2_HANDOFF.md#tests-executed-and-real-results).
+Last recorded run (DIP3, Windows, PostgreSQL 16 + pgvector 0.6.2): 330 passed, 3 skipped,
+95% coverage. Details: [docs/testing.md](docs/testing.md) and [DIP3_HANDOFF.md](DIP3_HANDOFF.md).
+CI runs the same commands: [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ## Using search and ask
 
@@ -324,12 +343,21 @@ Errors always look like
 - Retrieval: owner and completed-status filters inside every chunk query; `/ask` prompt
   keeps retrieved text in an escaped `<untrusted_sources>` block; citations restricted to
   sent sources; no secrets or document text in logs. Details: [docs/SECURITY.md](docs/SECURITY.md).
+- DIP3: rate limits, body limits before parsing, security headers, API docs off in
+  production, stricter production config validation, compose `cap_drop: [ALL]` +
+  `no-new-privileges`.
+
+More: [architecture](docs/architecture.md), [testing](docs/testing.md),
+[observability](docs/observability.md), [performance](docs/performance.md),
+[deployment](docs/deployment.md), [portfolio notes](docs/portfolio.md).
 
 ## Roadmap
 
 - **DIP2** - implemented except OCR: [DIP2_HANDOFF.md](DIP2_HANDOFF.md).
-- **DIP3** - GitHub Actions CI/CD, rate limiting, metrics and tracing, container
-  scanning and hardening, final docs: [DIP3_HANDOFF.md](DIP3_HANDOFF.md).
+- **DIP3** - implemented locally (rate limiting, metrics, hardening, CI workflow, docs);
+  Docker/CI verification outstanding: [DIP3_HANDOFF.md](DIP3_HANDOFF.md).
+- **Later** - tracing (OpenTelemetry), image scanning and digest pinning, a stuck-job
+  reaper, OCR, refresh tokens / revocation.
 
 ## Known limitations
 
@@ -338,13 +366,17 @@ Errors always look like
   latency, throughput and index behaviour at scale are not measured.
 - The `/ask` evidence threshold (0.48) was calibrated on that small set only.
 - Citations show which retrieved passage the model pointed at; there is no entailment check.
-- The multipart body is fully received (spooled by Starlette) before the size limit is
-  applied while copying to storage; there is no request-size limit in front of parsing.
+- Body size is now limited before parsing, but upload rate limiting runs after the
+  multipart body (at most the upload limit + 64 KiB) has been received.
 - DOCX validation only checks the ZIP signature.
 - If the broker is down at upload time the document is marked `failed`; it can be
   retried with `POST /documents/{id}/reprocess`.
-- No rate limiting, account lockout, refresh tokens or token revocation.
+- Rate limits are fixed-window (bursts of up to 2x at window edges) and fail open when
+  Redis is unavailable. No account lockout, refresh tokens or token revocation.
+- If the very last processing attempt cannot write its result to the database, the job
+  stays `processing` (no reaper yet); `POST /documents/{id}/reprocess` returns 409 for it.
+- No tracing; worker metrics exporter not verified.
 - The Redis password is passed to `redis-server` as a command-line argument (visible to
   anyone who can run `docker inspect` on the host).
 - Local filesystem storage only; API and worker must share the volume.
-- Performance and scalability are not measured yet.
+- Performance and scalability are not measured yet ([docs/performance.md](docs/performance.md)).
