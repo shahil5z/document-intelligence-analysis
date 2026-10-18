@@ -1,6 +1,9 @@
 .git
 .venv
 .env
+# the user's local key file and env backups never enter the build context
+env
+*.bak
 .env.*
 !.env.example
 **/__pycache__
@@ -15,3 +18,7 @@ tests
 docs
 *.md
 *.zip
+storage
+uploads
+logs
+*.log

@@ -23,6 +23,8 @@ x-app-environment: &app-environment
   STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
   STORAGE_PATH: /data/storage
   MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-10485760}
+  ALLOWED_EXTENSIONS: ${ALLOWED_EXTENSIONS:-pdf,docx,txt}
+  ALLOWED_CONTENT_TYPES: ${ALLOWED_CONTENT_TYPES:-application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain}
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
   # Used only by POST /ask (LLM_PROVIDER=openai). Never needed for upload, processing or /search.
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -47,6 +49,8 @@ x-app-environment: &app-environment
   LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
   LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
   LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+  LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-700}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0}
   MAX_CONTEXT_TOKENS: ${MAX_CONTEXT_TOKENS:-3000}
   # Hugging Face model cache on a named volume shared by api and worker (downloaded once).
   HF_HOME: /data/models
@@ -85,9 +89,13 @@ x-app-image: &app-image
     context: .
   image: document-intelligence-platform:local
 
+# Base images are pinned by multi-arch index digest (amd64 + arm64); the tag next to each
+# digest documents what it was resolved from on 2026-10-18. Bump both together, e.g.
+#   docker buildx imagetools inspect pgvector/pgvector:pg16   (see docs/deployment.md)
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    # pgvector 0.8.x on PostgreSQL 16 (readiness requires pgvector >= 0.5.0).
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dip}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
@@ -102,14 +110,24 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    # The password goes into a 0600 config file instead of the redis-server command
+    # line, so it does not show up in `ps` / `docker top`. The image's entrypoint then
+    # drops privileges to the redis user as usual. The old file is removed first: after
+    # a container restart it is owned by redis, and the kernel's protected_regular rule
+    # stops even root from re-opening it for writing in the sticky /tmp directory.
     command:
-      - redis-server
-      - --appendonly
-      - "yes"
-      - --requirepass
-      - ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+      - sh
+      - -c
+      - >-
+        umask 077 &&
+        rm -f /tmp/redis-auth.conf &&
+        printf 'requirepass %s\n' "$$REDIS_PASSWORD" > /tmp/redis-auth.conf &&
+        chown redis:redis /tmp/redis-auth.conf &&
+        unset REDIS_PASSWORD &&
+        exec docker-entrypoint.sh redis-server /tmp/redis-auth.conf --appendonly yes
     environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       # redis-cli reads this, so the healthcheck authenticates without a CLI argument.
       REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     volumes:

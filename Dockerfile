@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1
 
 # ---- build stage: resolve and install locked dependencies into a virtualenv ----
-FROM python:3.12-slim AS builder
+# Base images are pinned by multi-arch index digest; the tag documents the source
+# (resolved 2026-10-18, see docs/deployment.md for how to bump them).
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 /uv /usr/local/bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -15,7 +17,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # ---- runtime stage: slim image, no build tooling, non-root user ----
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS runtime
 
 LABEL org.opencontainers.image.title="document-intelligence-platform" \
       org.opencontainers.image.description="FastAPI + Celery document intelligence backend"

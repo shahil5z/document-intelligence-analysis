@@ -1,0 +1,26 @@
+# Optional override: route POST /ask to a local OpenAI-compatible stub instead of OpenAI.
+#   docker compose -f docker-compose.yml -f docker-compose.stub-llm.yml up -d
+# The stub cites [S1] (valid) and [S99] (invalid; the API must strip it). No key or
+# network needed: OPENAI_API_KEY only has to be a non-placeholder string for the stub.
+services:
+  stub-llm:
+    image: document-intelligence-platform:local
+    command: ["python", "/app/scripts/stub_llm_server.py"]
+    volumes:
+      - ./scripts/stub_llm_server.py:/app/scripts/stub_llm_server.py:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  api:
+    environment:
+      LLM_BASE_URL: http://stub-llm:8080/v1
+      LLM_MODEL: stub-model
+    depends_on:
+      stub-llm:
+        condition: service_healthy
