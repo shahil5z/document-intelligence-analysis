@@ -2,11 +2,14 @@
 .env
 .env.*
 !.env.example
+# A bare file literally named "env" at the repository root (used for keeping keys locally)
+/env
 
 # Python
 __pycache__/
 *.py[cod]
 .venv/
+venv/
 *.egg-info/
 
 # Tooling caches and reports
@@ -14,11 +17,16 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
 
-# Local runtime data
-storage_data/
+# Local runtime data. Anchored to the repository root so that source packages such
+# as app/storage/ are NOT ignored.
+/storage/
+/storage_data/
+/uploads/
+/logs/
 *.log
 
 # Archives / OS / editors

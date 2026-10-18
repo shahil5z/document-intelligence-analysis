@@ -31,7 +31,7 @@ def test_access_token_roundtrip_contains_expected_claims() -> None:
     payload = decode_access_token(token, settings)
     assert payload.subject == user_id
     assert payload.role is UserRole.ADMIN
-    assert expires_in == settings.access_token_expire_minutes * 60
+    assert expires_in == settings.jwt_access_token_expire_minutes * 60
     raw = jwt.decode(token, options={"verify_signature": False})
     assert {"sub", "role", "type", "jti", "iss", "iat", "exp"} <= raw.keys()
 
@@ -78,7 +78,7 @@ def test_non_access_token_type_is_rejected() -> None:
             "iat": now,
             "exp": now + timedelta(minutes=5),
         },
-        settings.jwt_secret.get_secret_value(),
+        settings.jwt_secret_key.get_secret_value(),
         algorithm=settings.jwt_algorithm,
     )
     with pytest.raises(InvalidTokenError):

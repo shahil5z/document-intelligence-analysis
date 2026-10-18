@@ -13,6 +13,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 from app.core.request_context import REQUEST_ID_HEADER
 from app.db.session import get_engine
+from app.storage.factory import check_storage_backend
 
 API_DESCRIPTION = """
 Backend foundation for a document intelligence platform.
@@ -60,10 +61,12 @@ def _register_middleware(app: FastAPI, settings: Settings) -> None:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    check_storage_backend(settings)
     configure_logging(settings.log_level)
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
+        debug=settings.debug,
         description=API_DESCRIPTION,
         openapi_tags=OPENAPI_TAGS,
         lifespan=_lifespan,

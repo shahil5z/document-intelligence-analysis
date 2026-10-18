@@ -7,14 +7,16 @@ from celery.signals import setup_logging
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.storage.factory import check_storage_backend
 
 
 def create_celery_app() -> Celery:
     settings = get_settings()
+    check_storage_backend(settings)
     app = Celery(
         "document_intelligence_platform",
-        broker=settings.celery_broker_url,
-        backend=settings.celery_result_backend,
+        broker=settings.get_celery_broker_url(),
+        backend=settings.get_celery_result_backend(),
         include=["app.workers.tasks"],
     )
     app.conf.update(

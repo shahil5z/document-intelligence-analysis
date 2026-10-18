@@ -26,8 +26,8 @@ if "test" not in (make_url(TEST_DATABASE_URL).database or ""):
 
 # Settings are read from the environment on first use, so set them before importing app.*
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
-os.environ["ENVIRONMENT"] = "test"
-os.environ["JWT_SECRET"] = secrets.token_urlsafe(48)
+os.environ["APP_ENV"] = "test"
+os.environ["JWT_SECRET_KEY"] = secrets.token_urlsafe(48)
 os.environ["MAX_UPLOAD_SIZE_BYTES"] = str(64 * 1024)
 os.environ["UPLOAD_CHUNK_SIZE_BYTES"] = "4096"
 os.environ["LOG_LEVEL"] = "WARNING"

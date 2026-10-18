@@ -43,4 +43,4 @@ class HealthService:
 
 
 def get_health_service() -> HealthService:
-    return HealthService(get_engine(), get_settings().redis_url)
+    return HealthService(get_engine(), get_settings().get_redis_url())

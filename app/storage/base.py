@@ -8,6 +8,10 @@ class StorageError(Exception):
     """Raised when the storage backend cannot complete an operation."""
 
 
+class StorageConfigurationError(StorageError):
+    """Raised when the configured storage backend is unknown or misconfigured."""
+
+
 class StorageKeyError(StorageError):
     """Raised for keys that are malformed or would escape the storage root."""
 

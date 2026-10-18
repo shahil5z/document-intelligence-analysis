@@ -18,7 +18,7 @@ from app.core.config import get_settings
 def get_engine() -> Engine:
     settings = get_settings()
     return create_engine(
-        settings.database_url,
+        settings.get_database_url(),
         pool_pre_ping=True,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,

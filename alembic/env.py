@@ -19,7 +19,7 @@ target_metadata = Base.metadata
 def _database_url() -> str:
     # Allows `alembic -x database_url=...` (used by the test suite), else Settings.
     return context.get_x_argument(as_dictionary=True).get("database_url") or (
-        get_settings().database_url
+        get_settings().get_database_url()
     )
 
 

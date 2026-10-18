@@ -50,7 +50,7 @@ def create_access_token(
 ) -> tuple[str, int]:
     """Return ``(encoded_token, expires_in_seconds)``."""
     issued_at = now or datetime.now(UTC)
-    lifetime = timedelta(minutes=settings.access_token_expire_minutes)
+    lifetime = timedelta(minutes=settings.jwt_access_token_expire_minutes)
     claims = {
         "sub": str(user_id),
         "role": role.value,
@@ -61,7 +61,7 @@ def create_access_token(
         "exp": issued_at + lifetime,
     }
     token = jwt.encode(
-        claims, settings.jwt_secret.get_secret_value(), algorithm=settings.jwt_algorithm
+        claims, settings.jwt_secret_key.get_secret_value(), algorithm=settings.jwt_algorithm
     )
     return token, int(lifetime.total_seconds())
 
@@ -70,7 +70,7 @@ def decode_access_token(token: str, settings: Settings) -> TokenPayload:
     try:
         claims = jwt.decode(
             token,
-            settings.jwt_secret.get_secret_value(),
+            settings.jwt_secret_key.get_secret_value(),
             algorithms=[settings.jwt_algorithm],
             issuer=settings.jwt_issuer,
             options={"require": ["sub", "role", "type", "jti", "iat", "exp", "iss"]},
