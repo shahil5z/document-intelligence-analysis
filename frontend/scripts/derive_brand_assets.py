@@ -1,7 +1,8 @@
 """Derive the web brand assets in public/brand/ from the 1024x1024 source logo.
 
 Usage:  python frontend/scripts/derive_brand_assets.py /path/to/logo.png
-Needs Pillow and numpy, optionally imagequant (not part of the app). Re-running overwrites the outputs.
+Needs Pillow and numpy, optionally imagequant (not part of the app).
+Re-running overwrites the outputs.
 
 Background removal: only the white area connected to the image border is removed
 (flood fill), so the near-white document page inside the "D" stays opaque. Edge pixels
@@ -36,9 +37,12 @@ def remove_background(img: Image.Image) -> Image.Image:
     mask[top:bottom, left:right] = 0
     candidate = Image.fromarray(mask).copy()
     w, h = candidate.size
-    for x, y in [(x, 0) for x in range(w)] + [(x, h - 1) for x in range(w)] + [
-        (0, y) for y in range(h)
-    ] + [(w - 1, y) for y in range(h)]:
+    for x, y in (
+        [(x, 0) for x in range(w)]
+        + [(x, h - 1) for x in range(w)]
+        + [(0, y) for y in range(h)]
+        + [(w - 1, y) for y in range(h)]
+    ):
         if candidate.getpixel((x, y)) == 255:
             ImageDraw.floodfill(candidate, (x, y), 128)
     bg = np.asarray(candidate) == 128
@@ -110,8 +114,9 @@ def save_pair(img: Image.Image, name: str) -> None:
     img.save(OUT / f"{name}.webp", quality=90, method=6)
 
 
-def square_icon(glyph: Image.Image, size: int, background: tuple[int, int, int] | None,
-                padding: float) -> Image.Image:
+def square_icon(
+    glyph: Image.Image, size: int, background: tuple[int, int, int] | None, padding: float
+) -> Image.Image:
     canvas = Image.new("RGBA", (size, size), (*background, 255) if background else (0, 0, 0, 0))
     inner = round(size * (1 - 2 * padding))
     scale = min(inner / glyph.width, inner / glyph.height)
@@ -159,10 +164,14 @@ def main(source: Path) -> None:
     save_pair(fit(lighten_dark_text(logo), 720), "logo-dark")
 
     icons = {size: square_icon(glyph, size, None, 0.04) for size in (16, 32, 48)}
-    icons[48].save(APP_DIR / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)],
-                   append_images=[icons[16], icons[32]])
-    square_icon(mark, 180, DARK_BG, 0.14).convert("RGB").save(OUT / "apple-touch-icon.png",
-                                                               optimize=True)
+    icons[48].save(
+        APP_DIR / "favicon.ico",
+        sizes=[(16, 16), (32, 32), (48, 48)],
+        append_images=[icons[16], icons[32]],
+    )
+    square_icon(mark, 180, DARK_BG, 0.14).convert("RGB").save(
+        OUT / "apple-touch-icon.png", optimize=True
+    )
     for size in (192, 512):
         save_png(square_icon(mark, size, DARK_BG, 0.14), OUT / f"icon-{size}.png")
     save_png(og_image(lighten_dark_text(logo)).convert("RGBA"), OUT / "og-image.png")
