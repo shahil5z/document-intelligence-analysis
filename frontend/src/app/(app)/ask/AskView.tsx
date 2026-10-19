@@ -195,10 +195,10 @@ export function AskView() {
           />
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <label htmlFor="ask-document" className="text-xs font-medium text-subtle">
+              <label htmlFor="ask-document" className="sr-only text-xs font-medium text-subtle sm:not-sr-only">
                 Document
               </label>
-              <div className="w-56 max-w-[60vw]">
+              <div className="w-48 max-w-[60vw] sm:w-56">
                 <DocumentFilter id="ask-document" value={documentId} onChange={setDocumentId} compact />
               </div>
             </div>

@@ -20,12 +20,14 @@ export function PublicHeader() {
             Architecture
           </Link>
           <ThemeToggle />
-          <Link href="/login" className="rounded-lg px-2.5 py-2 font-medium text-fg hover:bg-surface-2 sm:px-3">
+          <Link href="/login" className="whitespace-nowrap rounded-lg px-2.5 py-2 font-medium text-fg hover:bg-surface-2 sm:px-3">
             Sign in
           </Link>
-          <ButtonLink href="/register" size="sm" className="hidden sm:inline-flex">
-            Create account
-          </ButtonLink>
+          <span className="hidden sm:block">
+            <ButtonLink href="/register" size="sm">
+              Create account
+            </ButtonLink>
+          </span>
         </nav>
       </div>
     </header>

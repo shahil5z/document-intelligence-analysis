@@ -110,10 +110,10 @@ test("mobile: bottom navigation and demo banner", async ({ browser }) => {
     await expect(mobile.getByTestId("demo-banner")).toContainText("0 of 3 questions left");
     const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
-    await shot(mobile, `ask-mobile-${theme}`);
+    await shot(mobile, `ask-mobile-${theme}`, false);
     await mobile.goto("/dashboard");
     await expect(mobile.getByTestId("count-total")).toHaveText("1");
-    await shot(mobile, `dashboard-mobile-${theme}`);
+    await shot(mobile, `dashboard-mobile-${theme}`, false);
   }
   await mobile.context().close();
 });
