@@ -2,7 +2,9 @@ import path from "node:path";
 
 import type { Browser, BrowserContextOptions, Page } from "@playwright/test";
 
-export const SCREENSHOTS = path.resolve(__dirname, "../../docs/screenshots");
+// Screenshots land in frontend/e2e-screenshots/ (git-ignored); docs/screenshots/ holds a
+// curated, hand-picked subset. Set E2E_SCREENSHOT_DIR to write elsewhere.
+export const SCREENSHOTS = process.env.E2E_SCREENSHOT_DIR ?? path.resolve(__dirname, "../e2e-screenshots");
 export const FIXTURES = path.resolve(__dirname, "fixtures");
 
 export const DESKTOP = { width: 1366, height: 900 };

@@ -33,26 +33,14 @@ Taken by the Playwright suite against the local production-like stack
 (`docker-compose.prod.yml` behind Caddy with a local CA; `/ask` answered by the local
 **stub** LLM, not OpenAI).
 
-| | |
+| Dark (default) | Light |
 | --- | --- |
-| Landing ![landing](docs/screenshots/landing.png) | Dashboard ![dashboard](docs/screenshots/dashboard.png) |
-| Upload ![upload](docs/screenshots/upload.png) | Documents ![documents](docs/screenshots/documents.png) |
-| Document detail ![detail](docs/screenshots/document-detail.png) | Search ![search](docs/screenshots/search.png) |
-| Ask (stub LLM) ![ask](docs/screenshots/ask.png) | Architecture ![architecture](docs/screenshots/architecture.png) |
-| Mobile ![mobile](docs/screenshots/mobile-dashboard.png) | |
-
-UX round (dark default and light theme, desktop 1366px and mobile 375px):
-
-| Dark | Light |
-| --- | --- |
-| ![landing dark](docs/screenshots/landing-desktop-dark.png) | ![landing light](docs/screenshots/landing-desktop-light.png) |
-| ![ask dark](docs/screenshots/ask-citations-dark.png) | ![ask light](docs/screenshots/ask-citations-light.png) |
-| ![dashboard dark](docs/screenshots/dashboard-desktop-dark.png) | ![dashboard light](docs/screenshots/dashboard-desktop-light.png) |
-| ![demo modal dark](docs/screenshots/demo-limit-modal-dark.png) | ![demo modal light](docs/screenshots/demo-limit-modal-light.png) |
-| ![landing mobile dark](docs/screenshots/landing-mobile-dark.png) | ![landing mobile light](docs/screenshots/landing-mobile-light.png) |
-| ![ask mobile dark](docs/screenshots/ask-mobile-dark.png) | ![ask mobile light](docs/screenshots/ask-mobile-light.png) |
-
-Also: `login-*`, `impressum-*`, `dashboard-mobile-*`, `demo-upload-ready-dark.png`.
+| ![Landing page, dark](docs/screenshots/landing-desktop-dark.png) | ![Landing page, light](docs/screenshots/landing-desktop-light.png) |
+| ![Ask with citations, dark](docs/screenshots/ask-citations-dark.png) | ![Ask with citations, light](docs/screenshots/ask-citations-light.png) |
+| ![Dashboard, dark](docs/screenshots/dashboard-desktop-dark.png) | ![Dashboard, light](docs/screenshots/dashboard-desktop-light.png) |
+| ![Demo upload, dark](docs/screenshots/demo-upload-ready-dark.png) | ![Demo limit dialog, light](docs/screenshots/demo-limit-modal-light.png) |
+| ![Hybrid search, dark](docs/screenshots/search-desktop-dark.png) | ![Architecture page, dark](docs/screenshots/architecture-desktop-dark.png) |
+| ![Ask on mobile, dark](docs/screenshots/ask-mobile-dark.png) | ![Ask on mobile, light](docs/screenshots/ask-mobile-light.png) |
 
 ## 3. Live demo
 

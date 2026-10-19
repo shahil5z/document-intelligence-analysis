@@ -10,7 +10,9 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 // 15 nor find it in search  16 the session cookie is HttpOnly (no token in JS storage)
 // 17 delete the document  18 it is gone (list and direct URL)
 
-const SCREENSHOTS = path.resolve(__dirname, "../../docs/screenshots");
+// Screenshots land in frontend/e2e-screenshots/ (git-ignored); docs/screenshots/ holds a
+// curated, hand-picked subset. Set E2E_SCREENSHOT_DIR to write elsewhere.
+const SCREENSHOTS = process.env.E2E_SCREENSHOT_DIR ?? path.resolve(__dirname, "../e2e-screenshots");
 const FIXTURES = path.resolve(__dirname, "fixtures");
 const PASSWORD = "e2e-password-1234";
 const runId = Date.now().toString(36);
