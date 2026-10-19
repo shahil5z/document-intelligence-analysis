@@ -20,6 +20,7 @@ docs
 # ...except the prompt files the API loads at runtime (app/prompt/)
 !app/prompt/*.md
 *.zip
+*.bundle
 storage
 uploads
 logs

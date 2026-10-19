@@ -1,10 +1,18 @@
-# Environment / secrets
+# Environment / secrets (every .env variant; only the documented templates are tracked)
 .env
-.env.*
+.env*
 !.env.example
 !.env.production.example
+!frontend/.env.example
 # A bare file literally named "env" at the repository root (used for keeping keys locally)
 /env
+*.pem
+*.key
+
+# Git bundles and archives
+*.bundle
+*.zip
+*.tar.gz
 
 # Python
 __pycache__/
@@ -13,26 +21,34 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Tooling caches and reports
+# Tooling caches and coverage reports
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 .coverage.*
 coverage.xml
+coverage/
 htmlcov/
 
-# Local runtime data. Anchored to the repository root so that source packages such
-# as app/storage/ are NOT ignored.
+# Local runtime data: uploads and document storage. Anchored to the repository root so
+# that source packages such as app/storage/ are NOT ignored.
 /storage/
 /storage_data/
 /uploads/
 /logs/
 *.log
 
-# Archives / OS / editors
-*.zip
+# Brand source artwork (the derived assets in frontend/public/brand/ are tracked)
+logo-source*
+*-source.png
+*.psd
+*.afdesign
+*.ai
+
+# OS / editors
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 
@@ -41,12 +57,12 @@ htmlcov/
 
 # Frontend
 node_modules/
-/frontend/.next/
+.next/
 /frontend/out/
 /frontend/test-results/
 /frontend/playwright-report/
-/frontend/next-env.d.ts
-*.tsbuildinfo
-
-# Playwright screenshots (docs/screenshots/ is a curated subset)
+/frontend/blob-report/
 /frontend/e2e-screenshots/
+/frontend/next-env.d.ts
+.vercel/
+*.tsbuildinfo
