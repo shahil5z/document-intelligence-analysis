@@ -8,6 +8,9 @@ services:
   stub-llm:
     image: ${DIP_IMAGE:-document-intelligence-platform:prod}
     command: ["python", "/app/scripts/stub_llm_server.py"]
+    environment:
+      # structured (default) | fenced | text | legacy: see scripts/stub_llm_server.py
+      STUB_LLM_STYLE: ${STUB_LLM_STYLE:-structured}
     volumes:
       - ./scripts/stub_llm_server.py:/app/scripts/stub_llm_server.py:ro
     networks: [web]

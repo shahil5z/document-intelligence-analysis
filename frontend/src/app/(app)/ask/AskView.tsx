@@ -153,7 +153,7 @@ export function AskView() {
                   <button
                     type="button"
                     data-testid="starter-question"
-                    disabled={busy || outOfQuestions}
+                    disabled={busy}
                     onClick={() => void ask(starter)}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-muted transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-fg disabled:opacity-50"
                   >
@@ -190,8 +190,7 @@ export function AskView() {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={outOfQuestions ? "Demo questions used up. Create a free account to continue." : "Ask about your documents…  (Enter to send, Shift+Enter for a new line)"}
-            disabled={outOfQuestions}
+            placeholder={outOfQuestions ? "All demo questions used. Create a free account to keep asking." : "Ask about your documents…  (Enter to send, Shift+Enter for a new line)"}
             className="block w-full resize-none bg-transparent px-1 text-[15px] text-fg placeholder:text-subtle focus:outline-none disabled:cursor-not-allowed"
           />
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -203,7 +202,7 @@ export function AskView() {
                 <DocumentFilter id="ask-document" value={documentId} onChange={setDocumentId} compact />
               </div>
             </div>
-            <Button type="submit" disabled={busy || !question.trim() || outOfQuestions}>
+            <Button type="submit" disabled={busy || !question.trim()}>
               {busy ? "Thinking…" : "Ask"}
             </Button>
           </div>

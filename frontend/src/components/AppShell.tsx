@@ -131,7 +131,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen lg:flex">
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-border bg-surface lg:flex">
-        <Link href="/dashboard" className="flex h-16 items-center px-5" aria-label="Dashboard">
+        <Link href="/dashboard" className="flex h-16 items-center px-5">
           <Wordmark />
         </Link>
         <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 py-2">
@@ -162,7 +162,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {menuOpen ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
               </svg>
             </button>
-            <Link href="/dashboard" aria-label="Dashboard">
+            <Link href="/dashboard">
               <Wordmark compact />
             </Link>
           </div>

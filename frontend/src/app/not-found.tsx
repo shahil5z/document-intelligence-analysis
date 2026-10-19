@@ -5,7 +5,7 @@ import { Wordmark } from "@/components/Logo";
 export default function NotFound() {
   return (
     <main id="main" className="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center px-4 text-center">
-      <Link href="/" aria-label="Home" className="mb-10">
+      <Link href="/" className="mb-10">
         <Wordmark />
       </Link>
       <p className="text-sm font-semibold text-link">404</p>

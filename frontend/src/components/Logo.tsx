@@ -20,8 +20,8 @@ export function LogoMark({ height = 28, decorative = true }: { height?: number; 
 /** Mark + live text wordmark (crisp at any size, follows the theme). */
 export function Wordmark({ compact = false }: { compact?: boolean }) {
   return (
-    <span className="flex items-center gap-2.5" aria-label={PRODUCT_NAME}>
-      <LogoMark height={compact ? 22 : 26} />
+    <span className="flex items-center gap-2.5">
+      <LogoMark height={compact ? 22 : 26} decorative={false} />
       <span className="flex flex-col leading-none" aria-hidden="true">
         <span className="text-[13px] font-semibold tracking-tight text-fg">Document Intelligence</span>
         <span className="mt-0.5 text-[12px] font-semibold tracking-tight text-gradient">&amp; Analysis</span>

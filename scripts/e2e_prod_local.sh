@@ -71,6 +71,13 @@ with open(path, "w", encoding="utf-8") as fh:
     fh.writelines(f"{k}={v}\n" for k, v in lines.items())
 PY
 fi
+# Keys added after the env file may already exist: append the ones missing (generous
+# limits so repeated runs, including the demo flow, are not throttled).
+for kv in RATE_LIMIT_REGISTER_DAILY=1000/day RATE_LIMIT_UPLOAD_DAILY=1000/day \
+  RATE_LIMIT_UPLOAD_TOKEN=200/minute RATE_LIMIT_ASK_DAILY=1000/day RATE_LIMIT_DEMO=100/day \
+  RATE_LIMIT_DEMO_GLOBAL=1000/day DEMO_ENABLED=true; do
+  grep -q "^${kv%%=*}=" "$ENV_FILE" || printf '%s\n' "$kv" >>"$ENV_FILE"
+done
 # The Caddy root certificate is only readable once Caddy has created it; until then the
 # api bind mount needs the file to exist.
 touch "$E2E_DIR/caddy-root.crt"

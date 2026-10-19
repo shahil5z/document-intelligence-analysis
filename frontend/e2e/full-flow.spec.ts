@@ -57,11 +57,12 @@ let pageA: Page;
 test("public pages render", async ({ browser }) => {
   const page = await newPage(browser);
   await page.goto("/");
-  await expect(
-    page.getByRole("heading", {
-      name: "Upload documents, search their contents, and ask AI questions with grounded citations.",
-    }),
-  ).toBeVisible();
+  await expect(page).toHaveTitle("Document Intelligence & Analysis");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Ask your documents. Get answers you can verify.",
+  );
+  await expect(page.getByRole("img", { name: "Document Intelligence & Analysis" }).first()).toBeVisible();
+  await expect(page.getByRole("contentinfo")).toContainText(/© \d{4} Document Intelligence & Analysis/);
   await shot(page, "landing");
   await page.goto("/architecture");
   await expect(page.getByRole("heading", { name: "Architecture", exact: true })).toBeVisible();
@@ -152,14 +153,15 @@ test("7-8: ask shows an answer with citations (stub LLM)", async () => {
   await page.getByLabel("Your question").fill("How many days do customers have to return unused items?");
   await page.getByRole("button", { name: "Ask", exact: true }).click();
   const answer = page.getByTestId("answer");
-  await expect(answer).toContainText("Customers may return unused items within 30 days of delivery");
-  // The stub also cites [S99]; the API strips it and the UI never shows unknown sources.
-  await expect(answer).not.toContainText("S99");
-  await expect(answer.getByRole("link", { name: "Citation 1" })).toBeVisible();
+  // Structured stub reply (JSON schema output) built from the retrieved passages.
+  await expect(answer).toContainText("According to the document");
+  // The stub also cites [99], which was never sent; the API strips it.
+  await expect(answer).not.toContainText("99");
+  await expect(answer.getByRole("button", { name: "Citation 1" })).toBeVisible();
   const citations = page.getByTestId("citation");
-  await expect(citations).toHaveCount(1);
-  await expect(citations.first()).toContainText(/\[1\] refund-policy\.pdf - pages? 1/);
+  await expect(citations.first()).toContainText(/1\s*refund-policy\.pdf\s*pages? 1/);
   await citations.first().getByText("Show cited passage").click();
+  await expect(citations.first()).toHaveAttribute("data-active", "true");
   await expect(citations.first().locator("blockquote")).toContainText("30 days");
   await expect(page.getByText("AI answers can be wrong")).toBeVisible();
   await shot(page, "ask");
