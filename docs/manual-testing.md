@@ -380,6 +380,32 @@ through it by hand on Windows is NOT VERIFIED.
 | U15 | Settings > Sign out | back on the landing page; `/dashboard` redirects to login again |
 | U16 | Mobile width (DevTools device toolbar) | navigation collapses into a menu; pages remain usable |
 
+## UX round: demo mode, theme, Ask (frontend)
+
+Run the frontend (`cd frontend; npm run dev`) against the local API, or use
+`scripts/e2e_prod_local.sh`, which automates all of this with Playwright
+(`e2e/demo.spec.ts`, `e2e/theme.spec.ts`, `e2e/full-flow.spec.ts`).
+
+1. Open http://localhost:3000 in a fresh private window: the page is **dark** with no
+   white flash. The header shows the logo, "Document Intelligence & Analysis" in the tab
+   title, and a sun icon (switch to light).
+2. Click the toggle, reload: it stays light. Open `/login`: still light. Toggle back.
+3. With the Dark Reader extension on, the console shows no hydration warning
+   (the page sends `darkreader-lock` and `color-scheme`).
+4. "Try the demo": you land on `/upload?demo=1` with the banner
+   "Demo: 3 of 3 questions left". Upload a small PDF: the stepper goes
+   Uploading → Processing → Ready, a toast says "Document ready", then
+   "Ask questions about this document".
+5. Ask a question: the answer has `[1]` chips; clicking one highlights and expands the
+   source card. "Copy" copies the answer and sources. The banner counts down.
+6. After 3 questions, a 4th opens "Create a free account to continue". Uploading a second
+   file opens it too. Fill email + password: the account is converted, the banner
+   disappears and the document is still there.
+7. Hit a rate limit (e.g. set `RATE_LIMIT_ASK=2/minute` and ask 3 times): the message is
+   "You've reached the rate limit for this action. Please try again in N seconds."
+8. Resize to 375px wide: bottom navigation, hamburger menu, no horizontal scrolling.
+9. `/impressum` and `/privacy` render with highlighted placeholders.
+
 ## Production checks (after deploying)
 
 | # | Command | Expected |

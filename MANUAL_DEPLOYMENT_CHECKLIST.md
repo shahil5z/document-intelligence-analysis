@@ -37,6 +37,11 @@ and was **not** done while building the project. Tick the boxes in order. Detail
       `REDIS_PASSWORD` (`python3 -c "import secrets; print(secrets.token_urlsafe(48))"`).
 - [ ] `CORS_ALLOWED_ORIGINS`: leave the placeholder until step E gives you the Vercel
       URL, or put the expected URL now.
+- [ ] Generate `CLIENT_IP_HEADER_SECRET` (e.g. `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
+      and put it in `.env.production`; you set the same value on Vercel in step E. Without it,
+      per-IP limits (including the demo's 3 sessions per IP per day) count Vercel's egress IPs.
+- [ ] Review the public-demo limits (`DEMO_*`, `RATE_LIMIT_*_DAILY`, `RATE_LIMIT_DEMO*`) or set
+      `DEMO_ENABLED=false` to turn the demo off.
 - [ ] Store a copy of `.env.production` in your password manager.
 - [ ] `scripts/deploy.sh` (first build takes several minutes).
 - [ ] `scripts/health_check.sh --url https://<API_DOMAIN>` prints "all checks passed".
@@ -47,6 +52,10 @@ and was **not** done while building the project. Tick the boxes in order. Detail
 
 - [ ] New project from the GitHub repository; **Root Directory `frontend`**.
 - [ ] Environment variable `NEXT_PUBLIC_API_URL=https://<API_DOMAIN>` (Production; no trailing slash; not a secret).
+- [ ] `DIP_CLIENT_IP_SECRET` = the `CLIENT_IP_HEADER_SECRET` value (mark it Sensitive; server-only, no `NEXT_PUBLIC_` prefix).
+- [ ] Optional `NEXT_PUBLIC_SITE_URL=https://<your-frontend-domain>` (Open Graph image URLs; Vercel's production URL is used otherwise).
+- [ ] Fill in the placeholders on `/impressum` and `/privacy` (`frontend/src/app/(public)/{impressum,privacy}/page.tsx`)
+      and the GitHub link in `frontend/src/lib/brand.ts` before sharing the URL publicly.
 - [ ] Deploy; note the URL (e.g. `https://<project>.vercel.app`).
 - [ ] On the VM: `CORS_ALLOWED_ORIGINS=https://<project>.vercel.app` in `.env.production`, then `scripts/deploy.sh`.
 
@@ -63,7 +72,10 @@ and was **not** done while building the project. Tick the boxes in order. Detail
 - [ ] Create a project key with a monthly budget limit at platform.openai.com.
 - [ ] Put it **only** in `/opt/dip/.env.production` (`OPENAI_API_KEY=`), never in Vercel or Git.
 - [ ] `scripts/deploy.sh`; then the smoke test with `--with-llm --require-llm`.
-- [ ] Ask a question in the UI; the answer cites `[S1]`... that link to your document.
+- [ ] `py -3.12 scripts\check_ask_real.py --base-url https://<API_DOMAIN>`: the document-level and
+      specific questions must be answered with citations, the off-topic one refused (exit code 0).
+- [ ] Ask a question in the UI; the answer shows `[1]` chips that open the cited passage.
+- [ ] Landing page "Try the demo": upload a PDF, ask 3 questions, the 4th opens "Create a free account to continue".
 
 ## H. GitHub Actions deploy (optional)
 

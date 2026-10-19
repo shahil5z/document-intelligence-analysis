@@ -1,4 +1,7 @@
-# Document Intelligence Platform
+# Document Intelligence & Analysis
+
+> Repository, package, Docker service and database names keep the original
+> `document-intelligence-platform` / `dip` slugs; only user-facing text was renamed.
 
 ## 1. Overview
 
@@ -12,6 +15,13 @@ is scoped to the document owner inside SQL.
 - **Frontend**: Next.js App Router in [`frontend/`](frontend) (production phase).
 - **Production setup**: `docker-compose.prod.yml` + Caddy for a single Oracle Cloud
   Always Free Ampere VM, frontend on Vercel, ops scripts, CI/CD workflows.
+
+- **Demo mode**: "Try the demo" creates an ephemeral account (1 PDF, 3 questions,
+  deleted after 24 hours) that can be converted into a free account in place
+  ([docs/demo-mode.md](docs/demo-mode.md)).
+- **UI**: dark by default with a persisted light/dark toggle (applied before first
+  paint), sidebar on desktop and bottom navigation on mobile, chat-style Ask with
+  clickable `[n]` citation chips, upload stepper, toasts, Impressum/Privacy templates.
 
 What was verified, with numbers, is in [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md)
 (the single source of truth). OCR is **not implemented**: scanned PDFs fail with an
@@ -30,6 +40,19 @@ Taken by the Playwright suite against the local production-like stack
 | Document detail ![detail](docs/screenshots/document-detail.png) | Search ![search](docs/screenshots/search.png) |
 | Ask (stub LLM) ![ask](docs/screenshots/ask.png) | Architecture ![architecture](docs/screenshots/architecture.png) |
 | Mobile ![mobile](docs/screenshots/mobile-dashboard.png) | |
+
+UX round (dark default and light theme, desktop 1366px and mobile 375px):
+
+| Dark | Light |
+| --- | --- |
+| ![landing dark](docs/screenshots/landing-desktop-dark.png) | ![landing light](docs/screenshots/landing-desktop-light.png) |
+| ![ask dark](docs/screenshots/ask-citations-dark.png) | ![ask light](docs/screenshots/ask-citations-light.png) |
+| ![dashboard dark](docs/screenshots/dashboard-desktop-dark.png) | ![dashboard light](docs/screenshots/dashboard-desktop-light.png) |
+| ![demo modal dark](docs/screenshots/demo-limit-modal-dark.png) | ![demo modal light](docs/screenshots/demo-limit-modal-light.png) |
+| ![landing mobile dark](docs/screenshots/landing-mobile-dark.png) | ![landing mobile light](docs/screenshots/landing-mobile-light.png) |
+| ![ask mobile dark](docs/screenshots/ask-mobile-dark.png) | ![ask mobile light](docs/screenshots/ask-mobile-light.png) |
+
+Also: `login-*`, `impressum-*`, `dashboard-mobile-*`, `demo-upload-ready-dark.png`.
 
 ## 3. Live demo
 
@@ -164,8 +187,9 @@ The arm64 image was built and tested under emulation only.
 ## 10. Vercel
 
 [docs/vercel-deployment.md](docs/vercel-deployment.md): Root Directory `frontend`,
-one environment variable `NEXT_PUBLIC_API_URL=https://<API_DOMAIN>` (public, not a
-secret), then set `CORS_ALLOWED_ORIGINS` on the server to the Vercel URL. Sessions use
+`NEXT_PUBLIC_API_URL=https://<API_DOMAIN>` (public, not a secret), optionally
+`NEXT_PUBLIC_SITE_URL` (canonical URL for Open Graph images) and the server-only
+`DIP_CLIENT_IP_SECRET` (same value as the API's `CLIENT_IP_HEADER_SECRET`), then set `CORS_ALLOWED_ORIGINS` on the server to the Vercel URL. Sessions use
 an HttpOnly cookie set by Next.js route handlers ([ADR-006](docs/adr/ADR-006-frontend-auth-bff.md)).
 
 ## 11. Environment variables
@@ -173,7 +197,8 @@ an HttpOnly cookie set by Next.js route handlers ([ADR-006](docs/adr/ADR-006-fro
 Production keys (`API_DOMAIN`, `CADDY_TLS`, `CORS_ALLOWED_ORIGINS`, storage, capacity,
 rate limits, backups) are documented in [.env.production.example](.env.production.example)
 and [docs/production-deployment.md](docs/production-deployment.md#environment). The
-frontend reads only `NEXT_PUBLIC_API_URL` ([frontend/.env.example](frontend/.env.example)).
+frontend reads `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SITE_URL` and the server-only
+`DIP_CLIENT_IP_SECRET` ([frontend/.env.example](frontend/.env.example)).
 Backend (`.env`, [.env.example](.env.example)):
 
 Only three values are **mandatory**; everything else has a safe default. All names are
@@ -192,7 +217,7 @@ a message that names the variable, never the value.
 
 | Optional | Default | Notes |
 | --- | --- | --- |
-| `APP_NAME` / `APP_ENV` / `DEBUG` / `LOG_LEVEL` / `API_PORT` | `Document Intelligence Platform` / `development` / `false` / `INFO` / `8000` | `APP_ENV=production` enables stricter checks |
+| `APP_NAME` / `APP_ENV` / `DEBUG` / `LOG_LEVEL` / `API_PORT` | `Document Intelligence & Analysis` / `development` / `false` / `INFO` / `8000` | `APP_ENV=production` enables stricter checks |
 | `JWT_ALGORITHM` / `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `HS256` / `30` | HS256/384/512; 1-1440 minutes |
 | `POSTGRES_HOST` / `_PORT` / `_DB` / `_USER`, `DATABASE_URL` | `localhost` / `5432` / `dip` / `dip` | compose sets host/port itself |
 | `REDIS_HOST` / `_PORT` / `_DB`, `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` | `localhost` / `6379` / `0` | URLs built from the parts unless set |
@@ -205,15 +230,21 @@ a message that names the variable, never the value.
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` / `MAX_CHUNKS_PER_DOCUMENT` | `400` / `60` / `1000` | tokens of the embedding tokenizer |
 | `HF_HUB_OFFLINE` | `0` | `1` = use only the cached model |
 | `TOP_K` / `MAX_TOP_K` / `CANDIDATE_K` / `MAX_QUERY_LENGTH` | `5` / `20` / `40` / `1000` | |
-| `MIN_EVIDENCE_SIMILARITY` | `0.48` | below it `/ask` answers "insufficient evidence" without calling the LLM |
+| `MIN_EVIDENCE_SIMILARITY` | `0.48` | if the best passage is below it, `/ask` answers "insufficient evidence" without calling the LLM |
+| `ASK_TOP_K` / `ASK_CONTEXT_MIN_SIMILARITY` | `8` / `0.40` | passages sent to the LLM once the gate passed, and the floor for including them ([docs/rag.md](docs/rag.md)) |
+| `LLM_STRUCTURED_OUTPUT` | `true` | JSON-schema structured output; one automatic retry without it if the endpoint rejects the schema |
 | `RERANKING_ENABLED` / `RERANKER_MODEL` / `RERANK_TOP_K` | `false` / `cross-encoder/ms-marco-MiniLM-L-6-v2` / `20` | optional cross-encoder |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `openai` / `gpt-4o-mini` / `https://api.openai.com/v1` | any OpenAI-compatible endpoint; `none` disables `/ask` |
-| `LLM_TIMEOUT_SECONDS` / `LLM_MAX_OUTPUT_TOKENS` / `LLM_TEMPERATURE` / `MAX_CONTEXT_TOKENS` | `30` / `700` / `0` / `3000` | |
+| `LLM_TIMEOUT_SECONDS` / `LLM_MAX_OUTPUT_TOKENS` / `LLM_TEMPERATURE` / `MAX_CONTEXT_TOKENS` | `30` / `900` / `0` / `4000` | |
 | `API_DOCS_ENABLED` | empty (on; off in production) | `/docs`, `/redoc`, `/openapi.json` |
 | `MAX_REQUEST_BODY_BYTES` / `UPLOAD_BODY_OVERHEAD_BYTES` | `1048576` / `65536` | enforced before the body is parsed |
 | `SECURITY_HEADERS_ENABLED` | `true` | HSTS only in production |
 | `RATE_LIMIT_ENABLED` / `RATE_LIMIT_BACKEND` | `true` / `redis` | `memory` is per process, rejected in production |
-| `RATE_LIMIT_REGISTER` / `_LOGIN` / `_LOGIN_PER_EMAIL` / `_UPLOAD` / `_SEARCH` / `_ASK` / `_REPROCESS` | `5/minute` / `10/minute` / `5/minute` / `30/minute` / `60/minute` / `20/minute` / `10/minute` | `N/second\|minute\|hour\|day` |
+| `RATE_LIMIT_REGISTER` / `_LOGIN` / `_LOGIN_PER_EMAIL` / `_UPLOAD` / `_SEARCH` / `_ASK` / `_REPROCESS` | `5/minute` / `10/minute` / `5/minute` / `10/minute` / `60/minute` / `10/minute` / `10/minute` | `N/second\|minute\|hour\|day` |
+| `RATE_LIMIT_REGISTER_DAILY` / `_UPLOAD_DAILY` / `_UPLOAD_TOKEN` / `_ASK_DAILY` | `20/day` / `100/day` / `30/minute` / `200/day` | second, longer window for public demos |
+| `RATE_LIMIT_DEMO` / `RATE_LIMIT_DEMO_GLOBAL` | `3/day` per IP / `200/day` total | demo sessions; fail closed if Redis is down |
+| `DEMO_ENABLED` / `DEMO_MAX_QUESTIONS` / `DEMO_MAX_UPLOADS` / `DEMO_MAX_UPLOAD_BYTES` / `DEMO_ALLOWED_EXTENSIONS` / `DEMO_TTL_HOURS` / `DEMO_CLEANUP_INTERVAL_SECONDS` | `true` / `3` / `1` / `5242880` / `pdf` / `24` / `900` | [docs/demo-mode.md](docs/demo-mode.md) |
+| `CLIENT_IP_HEADER_SECRET` | unset | >= 24 chars; the API trusts `X-DIP-Client-IP` from the BFF only with this shared secret (set the same value as `DIP_CLIENT_IP_SECRET` on Vercel). Strongly recommended in production, otherwise per-IP limits count Vercel's egress IPs |
 | `METRICS_ENABLED` / `WORKER_METRICS_PORT` | `true` / empty | compose sets the worker port to 9100 |
 | `CELERY_TASK_SOFT_TIME_LIMIT` / `CELERY_TASK_TIME_LIMIT` | `240` / `300` | seconds; soft < hard |
 | `STALE_JOB_TIMEOUT_SECONDS` / `STALE_JOB_CHECK_INTERVAL_SECONDS` | `900` / `300` | reconciler; timeout must exceed the hard limit; interval `0` = not scheduled |
@@ -286,12 +317,18 @@ non-destructive checks, and `--replace-live-database --i-understand-this-overwri
   `/ask` evidence threshold (0.48) was calibrated on that set only. Citations show which
   passage the model pointed at; no entailment check.
 - Fixed-window rate limits (bursts up to 2x at window edges); behind the Vercel BFF the
-  per-IP limits count Vercel egress IPs. No refresh tokens, revocation or lockout;
+  per-IP limits count Vercel egress IPs unless `CLIENT_IP_HEADER_SECRET` /
+  `DIP_CLIENT_IP_SECRET` are set. No refresh tokens, revocation or lockout;
   sessions end with the 30-minute token.
 - Single VM: no replication, failover or horizontal scaling; backups are on the VM
   unless copied off. `/metrics` is unauthenticated (internal only).
 - The document detail page shows metadata and processing state, not the document text
   (the API has no content-preview endpoint).
+- `/ask` was fixed and replay-tested against hand-written reply fixtures and a local
+  stub; it was **not** run against real OpenAI here. Run
+  `python scripts/check_ask_real.py --base-url <api-url>` with your own key to verify.
+- Impressum and Privacy pages are templates with highlighted placeholders; they are
+  not legal advice and must be completed by the operator.
 - The LLM client sends `max_tokens` and `temperature`; some reasoning models reject them.
 - Performance measured on one machine with small documents; no load testing.
 

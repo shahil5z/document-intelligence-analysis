@@ -1,4 +1,4 @@
-# Portfolio notes: Document Intelligence Platform (final)
+# Portfolio notes: Document Intelligence & Analysis (final)
 
 Interview-oriented summary. Each claim below was executed; anything not run is marked
 **NOT VERIFIED** and anything not quantified is marked **Not measured**. Full evidence:

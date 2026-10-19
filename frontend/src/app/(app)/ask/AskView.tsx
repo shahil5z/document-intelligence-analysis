@@ -176,7 +176,7 @@ export function AskView() {
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={onSubmit} className="sticky bottom-20 z-10 mt-6 lg:bottom-4">
+      <form onSubmit={onSubmit} className="sticky bottom-14 z-10 -mx-4 mt-6 bg-background/95 px-4 pb-3 pt-2 backdrop-blur-sm sm:-mx-6 sm:px-6 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-4">
         <div className="rounded-2xl border border-border bg-surface p-3 shadow-pop focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-ring/30">
           <label htmlFor="question" className="sr-only">
             Your question

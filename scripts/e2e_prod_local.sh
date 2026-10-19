@@ -112,10 +112,15 @@ code="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$E2E_DIR/caddy-root.crt
 log "building the frontend for $API_URL"
 cd "$ROOT/frontend"
 NEXT_PUBLIC_API_URL="$API_URL" NEXT_TELEMETRY_DISABLED=1 npm run build >"$E2E_DIR/next-build.log" 2>&1
+if (exec 3<>/dev/tcp/127.0.0.1/3000) 2>/dev/null; then
+  log "port 3000 is already in use (a stale 'next start'?); stop it first"
+  exit 1
+fi
+# Own process group, so the trap also stops the next-server child that npx spawns.
 NODE_EXTRA_CA_CERTS="$E2E_DIR/caddy-root.crt" NEXT_PUBLIC_API_URL="$API_URL" \
-  npx next start -H 0.0.0.0 -p 3000 >"$E2E_DIR/next-start.log" 2>&1 &
+  setsid npx next start -H 0.0.0.0 -p 3000 >"$E2E_DIR/next-start.log" 2>&1 &
 NEXT_PID=$!
-trap 'kill "$NEXT_PID" 2>/dev/null || true' EXIT
+trap 'kill -- "-$NEXT_PID" 2>/dev/null || kill "$NEXT_PID" 2>/dev/null || true' EXIT
 curl -fsS --retry 30 --retry-delay 1 --retry-all-errors --cacert "$E2E_DIR/caddy-root.crt" "$APP_URL/" >/dev/null
 
 log "running Playwright against $APP_URL"
