@@ -133,7 +133,7 @@ $s | ConvertTo-Json -Depth 5
 Expected: `completed`, `job.status : completed`, `job.stage : index`, `chunk_count : 1`.
 The first document can take a minute while the worker downloads the embedding model
 (~130 MB). If it ends `failed` with "Processing failed after several attempts", the
-worker could not reach huggingface.co: see README "Offline model cache".
+worker could not reach huggingface.co: see [deployment.md](deployment.md#offline-model-cache).
 
 ### 11. Semantic search
 

@@ -65,7 +65,7 @@ and was **not** done while building the project. Tick the boxes in order. Detail
       with `$env:SMOKE_EMAIL` / `$env:SMOKE_PASSWORD` set to a throw-away account. Expect `RESULT: PASS`.
 - [ ] In the browser on the Vercel URL: register, upload a PDF, wait for "Completed",
       search, ask (503 "not configured" is expected without an OpenAI key), delete.
-- [ ] Update the "Live demo" table in `README.md` with both URLs.
+- [ ] Replace the "Live demo: coming soon" line at the top of `README.md` with the frontend URL (and the API URL), and update the status table.
 
 ## G. OpenAI (optional, costs money)
 

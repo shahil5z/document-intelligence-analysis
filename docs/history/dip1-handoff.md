@@ -157,7 +157,7 @@ From `.env.example`: `APP_NAME`, `APP_ENV`, `DEBUG`, `LOG_LEVEL`, `API_PORT`,
 `MAX_UPLOAD_SIZE_BYTES`, `ALLOWED_EXTENSIONS`, `ALLOWED_CONTENT_TYPES`,
 `CORS_ALLOWED_ORIGINS`, `OPENAI_API_KEY`; commented optional overrides `DATABASE_URL`,
 `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `TEST_DATABASE_URL`,
-`TEST_REDIS_URL`. Defaults and rules: [README.md](../../README.md#environment-variables).
+`TEST_REDIS_URL`. Defaults and rules: [README.md](../configuration.md).
 
 ## 11. Commands
 
