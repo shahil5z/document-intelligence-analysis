@@ -2,184 +2,379 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Fragment, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
+import { Markdown } from "@/components/ask/Markdown";
 import { DocumentFilter } from "@/components/DocumentFilter";
 import { ErrorAlert } from "@/components/ErrorAlert";
-import { Button, Card, Field, PageHeader, Skeleton, inputClass } from "@/components/ui";
+import { useSession } from "@/components/SessionProvider";
+import { useToast } from "@/components/Toast";
+import { Badge, Button, Card } from "@/components/ui";
 import { api } from "@/lib/client/api";
 import { pageLabel } from "@/lib/format";
 import type { AskResponse, Citation } from "@/lib/types";
 
-/** Replace the model's [S1] markers with [1] links, only for citations the API returned. */
-function renderAnswer(answer: string, numbers: Map<string, number>): ReactNode[] {
-  return answer.split(/(\[S\d+\])/g).map((part, index) => {
-    const match = /^\[(S\d+)\]$/.exec(part);
-    const number = match ? numbers.get(match[1]) : undefined;
-    if (number === undefined) return <Fragment key={index}>{part}</Fragment>;
-    return (
-      <a
-        key={index}
-        href={`#citation-${number}`}
-        className="mx-0.5 rounded bg-brand-50 px-1 text-xs font-semibold text-brand-700 no-underline hover:bg-brand-100"
-        aria-label={`Citation ${number}`}
-      >
-        [{number}]
-      </a>
-    );
-  });
+const HISTORY_KEY = "dia-ask-history";
+const HISTORY_LIMIT = 20;
+
+const STARTERS = [
+  "Summarize this document in a few bullet points.",
+  "What are the key dates, deadlines or time limits?",
+  "What obligations or requirements does it describe?",
+  "Are there any fees, costs or amounts mentioned?",
+];
+
+const INSUFFICIENT_TEXT: Record<string, string> = {
+  below_threshold: "No passage in your documents was relevant enough to this question, so no answer was generated.",
+  model_declined: "The relevant passages don't contain the answer, so none was generated.",
+  no_valid_citations: "The answer could not be tied to any retrieved passage, so it was withheld.",
+  parse_failed: "The model's reply could not be read reliably, so it was withheld. Please try again.",
+};
+
+interface Turn {
+  id: string;
+  question: string;
+  documentId: string;
+  askedAt: number;
+  response?: AskResponse;
+  error?: unknown;
+}
+
+function loadHistory(): Turn[] {
+  try {
+    const raw = window.sessionStorage.getItem(HISTORY_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Turn[]) : [];
+    return Array.isArray(parsed) ? parsed.filter((t) => t.response) : [];
+  } catch {
+    return [];
+  }
+}
+
+function plainAnswer(response: AskResponse): string {
+  const sources = response.citations
+    .map((c) => `[${c.number}] ${c.filename}${pageLabel(c.page_start, c.page_end) ? `, ${pageLabel(c.page_start, c.page_end)}` : ""}`)
+    .join("\n");
+  return sources ? `${response.answer}\n\nSources:\n${sources}` : response.answer;
 }
 
 export function AskView() {
   const params = useSearchParams();
+  const { user, setDemoQuestionsRemaining } = useSession();
+  const toast = useToast();
   const [question, setQuestion] = useState("");
   const [documentId, setDocumentId] = useState(params.get("document") ?? "");
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const [result, setResult] = useState<{ question: string; response: AskResponse } | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const asked = question.trim();
-    if (!asked) return;
-    setBusy(true);
-    setError(null);
+  useEffect(() => {
+    // sessionStorage is only readable after mount; this keeps SSR and first paint identical.
+    setTurns(loadHistory());
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
     try {
-      const response = await api.post<AskResponse>("ask", {
-        question: asked,
-        document_id: documentId || null,
-      });
-      setResult({ question: asked, response });
+      const keep = turns.filter((t) => t.response).slice(-HISTORY_LIMIT);
+      window.sessionStorage.setItem(HISTORY_KEY, JSON.stringify(keep));
+    } catch {
+      // storage full or disabled: history simply isn't kept
+    }
+  }, [turns, hydrated]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [turns.length, busy]);
+
+  async function ask(text: string) {
+    const asked = text.trim();
+    if (!asked || busy) return;
+    const turn: Turn = { id: crypto.randomUUID(), question: asked, documentId, askedAt: Date.now() };
+    setTurns((prev) => [...prev, turn]);
+    setQuestion("");
+    setBusy(true);
+    try {
+      const response = await api.post<AskResponse>("ask", { question: asked, document_id: documentId || null });
+      setTurns((prev) => prev.map((t) => (t.id === turn.id ? { ...t, response } : t)));
+      if (typeof response.demo_questions_remaining === "number") setDemoQuestionsRemaining(response.demo_questions_remaining);
     } catch (err) {
-      setError(err);
-      setResult(null);
+      setTurns((prev) => prev.map((t) => (t.id === turn.id ? { ...t, error: err } : t)));
     } finally {
       setBusy(false);
+      inputRef.current?.focus();
     }
   }
 
-  const response = result?.response;
-  const numbers = new Map((response?.citations ?? []).map((c, i) => [c.source_id, i + 1]));
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void ask(question);
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      void ask(question);
+    }
+  }
+
+  const demo = user?.is_demo ? user.demo : null;
+  const outOfQuestions = demo ? demo.questions_remaining <= 0 : false;
 
   return (
-    <>
-      <PageHeader
-        title="Ask AI"
-        description="Answers are generated only from passages retrieved from your documents."
-      />
-      <Card className="p-4 sm:p-6">
-        <form onSubmit={onSubmit} className="space-y-4">
-          <Field id="question" label="Your question">
-            <textarea
-              id="question"
-              required
-              rows={3}
-              maxLength={1000}
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="e.g. How many days do customers have to return an item?"
-              className={inputClass}
-            />
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field id="ask-document" label="Document">
-              <DocumentFilter id="ask-document" value={documentId} onChange={setDocumentId} />
-            </Field>
-          </div>
-          <div className="flex flex-wrap items-center gap-4">
-            <Button type="submit" disabled={busy || !question.trim()}>
-              {busy ? "Thinking…" : "Ask"}
-            </Button>
-            <p className="text-xs text-slate-500">
-              AI answers can be wrong or incomplete. Check the cited passages before relying on them.
-            </p>
-          </div>
-        </form>
-      </Card>
+    <div className="mx-auto flex max-w-3xl flex-col">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-fg">Ask AI</h1>
+          <p className="mt-1 text-sm text-muted">Answers come only from passages in your documents, with numbered sources.</p>
+        </div>
+        {turns.length > 0 ? (
+          <Button variant="ghost" size="sm" onClick={() => setTurns([])} disabled={busy}>
+            Clear conversation
+          </Button>
+        ) : null}
+      </div>
 
-      <section aria-label="Answer" aria-live="polite" className="mt-6 space-y-4">
-        {error ? <ErrorAlert error={error} /> : null}
-        {busy ? (
-          <Card className="space-y-3 p-5" role="status">
-            <span className="sr-only">Generating answer…</span>
-            <Skeleton className="h-4 w-1/3" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-5/6" />
+      <div className="mt-6 flex-1 space-y-6" aria-live="polite" aria-busy={busy}>
+        {hydrated && turns.length === 0 ? (
+          <Card className="p-6 text-center sm:p-8">
+            <div aria-hidden="true" className="bg-brand-gradient mx-auto flex h-11 w-11 items-center justify-center rounded-xl text-white">
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M8 10h8M8 14h5M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-6l-4 3v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <h2 className="mt-4 font-semibold text-fg">Ask a question about your documents</h2>
+            <p className="mt-1 text-sm text-muted">Pick a document below or ask across all of them. Try one of these:</p>
+            <ul className="mt-5 grid gap-2 text-left sm:grid-cols-2">
+              {STARTERS.map((starter) => (
+                <li key={starter}>
+                  <button
+                    type="button"
+                    data-testid="starter-question"
+                    disabled={busy || outOfQuestions}
+                    onClick={() => void ask(starter)}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-muted transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-fg disabled:opacity-50"
+                  >
+                    {starter}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </Card>
         ) : null}
 
-        {!busy && result && response ? (
-          response.insufficient_evidence ? (
-            <Card className="border-amber-200 bg-amber-50 p-5" data-testid="insufficient-evidence">
-              <h2 className="font-semibold text-amber-900">Not enough evidence</h2>
-              <p className="mt-1 text-sm text-amber-900">
-                Your documents don&apos;t contain passages that answer this question well enough,
-                so no answer was generated. Try rephrasing, choosing another document, or
-                uploading a document that covers the topic.
-              </p>
-            </Card>
-          ) : (
-            <>
-              <Card className="p-5" data-testid="answer">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Answer</p>
-                <p className="mt-1 text-sm font-medium text-slate-700">{result.question}</p>
-                <div className="mt-3 whitespace-pre-line text-[15px] leading-7 text-slate-900">
-                  {renderAnswer(response.answer, numbers)}
-                </div>
-                <p className="mt-4 text-xs text-slate-500">
-                  Based on {response.sources_considered} retrieved passage
-                  {response.sources_considered === 1 ? "" : "s"}
-                  {response.model ? ` · model ${response.model}` : ""}
-                  {response.warnings.includes("invalid_citations_removed")
-                    ? " · references the system could not verify were removed"
-                    : ""}
-                </p>
-              </Card>
-              {response.citations.length > 0 ? (
-                <div>
-                  <h2 className="mb-2 text-sm font-semibold text-slate-900">Sources</h2>
-                  <ol className="space-y-3">
-                    {response.citations.map((citation, index) => (
-                      <CitationCard key={citation.chunk_id} citation={citation} number={index + 1} />
-                    ))}
-                  </ol>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-600">The answer did not cite any passage.</p>
-              )}
-            </>
-          )
-        ) : null}
-      </section>
-    </>
+        {turns.map((turn) => (
+          <TurnView key={turn.id} turn={turn} onCopy={(text) => {
+            void navigator.clipboard.writeText(text).then(
+              () => toast.show({ tone: "success", title: "Copied", message: "Answer and sources copied to the clipboard." }),
+              () => toast.show({ tone: "error", title: "Copy failed", message: "Your browser blocked clipboard access." }),
+            );
+          }} />
+        ))}
+        <div ref={endRef} />
+      </div>
+
+      <form onSubmit={onSubmit} className="sticky bottom-20 z-10 mt-6 lg:bottom-4">
+        <div className="rounded-2xl border border-border bg-surface p-3 shadow-pop focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-ring/30">
+          <label htmlFor="question" className="sr-only">
+            Your question
+          </label>
+          <textarea
+            id="question"
+            ref={inputRef}
+            required
+            rows={2}
+            maxLength={1000}
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={outOfQuestions ? "Demo questions used up. Create a free account to continue." : "Ask about your documents…  (Enter to send, Shift+Enter for a new line)"}
+            disabled={outOfQuestions}
+            className="block w-full resize-none bg-transparent px-1 text-[15px] text-fg placeholder:text-subtle focus:outline-none disabled:cursor-not-allowed"
+          />
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <label htmlFor="ask-document" className="text-xs font-medium text-subtle">
+                Document
+              </label>
+              <div className="w-56 max-w-[60vw]">
+                <DocumentFilter id="ask-document" value={documentId} onChange={setDocumentId} compact />
+              </div>
+            </div>
+            <Button type="submit" disabled={busy || !question.trim() || outOfQuestions}>
+              {busy ? "Thinking…" : "Ask"}
+            </Button>
+          </div>
+        </div>
+        <p className="mt-2 text-center text-xs text-subtle">
+          AI answers can be wrong or incomplete. Check the cited passages before relying on them.
+        </p>
+      </form>
+    </div>
   );
 }
 
-function CitationCard({ citation, number }: { citation: Citation; number: number }) {
+function TypingIndicator() {
+  return (
+    <div role="status" className="flex items-center gap-2 text-sm text-muted" data-testid="typing-indicator">
+      <span className="flex gap-1" aria-hidden="true">
+        {[0, 150, 300].map((delay) => (
+          <span key={delay} className="h-2 w-2 animate-bounce rounded-full bg-brand-500" style={{ animationDelay: `${delay}ms` }} />
+        ))}
+      </span>
+      Searching your documents and writing an answer…
+    </div>
+  );
+}
+
+function TurnView({ turn, onCopy }: { turn: Turn; onCopy: (text: string) => void }) {
+  const [active, setActive] = useState<number | null>(null);
+  const response = turn.response;
+
+  function focusCitation(number: number) {
+    setActive(number);
+    document.getElementById(`citation-${turn.id}-${number}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  return (
+    <article className="animate-slide-up space-y-3">
+      <div className="flex justify-end">
+        <p className="max-w-[85%] whitespace-pre-line rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-[15px] text-white" data-testid="question-bubble">
+          {turn.question}
+        </p>
+      </div>
+
+      {!response && !turn.error ? (
+        <Card className="p-4">
+          <TypingIndicator />
+        </Card>
+      ) : null}
+
+      {turn.error ? <ErrorAlert error={turn.error} /> : null}
+
+      {response?.insufficient_evidence ? (
+        <Card className="border-amber-200 bg-amber-50 p-5" data-testid="insufficient-evidence">
+          <h2 className="font-semibold text-amber-900">Not enough evidence</h2>
+          <p className="mt-1 text-sm text-amber-900">
+            {INSUFFICIENT_TEXT[response.insufficient_reason ?? ""] ?? INSUFFICIENT_TEXT.model_declined} Try rephrasing,
+            choosing another document, or uploading a document that covers the topic.
+          </p>
+        </Card>
+      ) : null}
+
+      {response && !response.insufficient_evidence ? (
+        <Card className="p-5" data-testid="answer">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-subtle">Answer</span>
+              {response.partial ? <Badge tone="warning">Partial</Badge> : null}
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => onCopy(plainAnswer(response))} aria-label="Copy answer">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <rect x="9" y="9" width="11" height="11" rx="2" />
+                <path d="M5 15V5a1 1 0 0 1 1-1h10" />
+              </svg>
+              Copy
+            </Button>
+          </div>
+          <div className="text-[15px] leading-7 text-fg">
+            <Markdown
+              source={response.answer}
+              renderCitation={(number, key) =>
+                response.citations.some((c) => c.number === number) ? (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => focusCitation(number)}
+                    aria-label={`Citation ${number}`}
+                    data-testid="citation-chip"
+                    className={`mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-md px-1 align-text-top text-[11px] font-semibold transition-colors ${
+                      active === number ? "bg-primary text-white" : "bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-200 hover:bg-brand-100"
+                    }`}
+                  >
+                    {number}
+                  </button>
+                ) : null
+              }
+            />
+          </div>
+          {response.partial && response.missing_information ? (
+            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="missing-information">
+              <strong className="font-semibold">Not covered by your documents:</strong> {response.missing_information}
+            </p>
+          ) : null}
+          <p className="mt-4 text-xs text-subtle">
+            Based on {response.sources_considered} retrieved passage{response.sources_considered === 1 ? "" : "s"}
+            {response.model ? ` · ${response.model}` : ""}
+            {response.warnings.includes("invalid_citations_removed") ? " · references that could not be verified were removed" : ""}
+          </p>
+          {response.citations.length > 0 ? (
+            <div className="mt-4 border-t border-border pt-4">
+              <h2 className="mb-2 text-sm font-semibold text-fg">Sources</h2>
+              <ol className="space-y-2">
+                {response.citations.map((citation) => (
+                  <CitationCard
+                    key={citation.chunk_id}
+                    turnId={turn.id}
+                    citation={citation}
+                    active={active === citation.number}
+                    onToggle={(open) => setActive(open ? citation.number : null)}
+                  />
+                ))}
+              </ol>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+    </article>
+  );
+}
+
+function CitationCard({
+  turnId,
+  citation,
+  active,
+  onToggle,
+}: {
+  turnId: string;
+  citation: Citation;
+  active: boolean;
+  onToggle: (open: boolean) => void;
+}) {
   const page = pageLabel(citation.page_start, citation.page_end);
   const preview = citation.snippet.length > 160 ? `${citation.snippet.slice(0, 160)}…` : citation.snippet;
   return (
-    <li id={`citation-${number}`} className="scroll-mt-24">
-      <Card className="p-4" data-testid="citation">
-        <p className="text-sm font-semibold text-slate-900">
-          [{number}]{" "}
-          <Link href={`/documents/${citation.document_id}`} className="text-brand-700 hover:underline">
+    <li id={`citation-${turnId}-${citation.number}`} className="scroll-mt-24">
+      <div
+        data-testid="citation"
+        data-active={active ? "true" : "false"}
+        className={`rounded-lg border p-3 transition-colors ${active ? "border-brand-400 bg-brand-50 ring-2 ring-ring/25" : "border-border bg-surface-2"}`}
+      >
+        <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-fg">
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-primary px-1 text-[11px] font-semibold text-white">
+            {citation.number}
+          </span>
+          <Link href={`/documents/${citation.document_id}`} className="text-link hover:underline">
             {citation.filename}
           </Link>
-          {page ? <span className="font-normal text-slate-600"> - {page}</span> : null}
+          {page ? <span className="font-normal text-subtle">{page}</span> : null}
         </p>
-        <p className="mt-2 text-sm text-slate-700">{preview}</p>
-        <details className="mt-2">
-          <summary className="cursor-pointer text-sm font-medium text-brand-700">Show cited passage</summary>
-          <blockquote className="mt-2 whitespace-pre-line border-l-2 border-brand-200 pl-3 text-sm leading-6 text-slate-800">
+        {!active ? <p className="mt-1.5 text-sm text-muted">{preview}</p> : null}
+        <details open={active} onToggle={(e) => { if (e.currentTarget.open !== active) onToggle(e.currentTarget.open); }} className="mt-1.5">
+          <summary className="cursor-pointer text-xs font-medium text-link">
+            {active ? "Hide cited passage" : "Show cited passage"}
+          </summary>
+          <blockquote className="mt-2 whitespace-pre-line border-l-2 border-brand-300 pl-3 text-sm leading-6 text-fg">
             {citation.snippet}
             {citation.char_end - citation.char_start > citation.snippet.length ? "…" : ""}
           </blockquote>
-          <p className="mt-2 text-xs text-slate-500">
-            Chunk {citation.chunk_index + 1} · characters {citation.char_start}-{citation.char_end}
+          <p className="mt-2 text-xs text-subtle">
+            Passage {citation.chunk_index + 1} · characters {citation.char_start}-{citation.char_end}
           </p>
         </details>
-      </Card>
+      </div>
     </li>
   );
 }

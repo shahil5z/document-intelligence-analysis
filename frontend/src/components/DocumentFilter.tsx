@@ -10,10 +10,12 @@ export function DocumentFilter({
   id,
   value,
   onChange,
+  compact = false,
 }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
+  compact?: boolean;
 }) {
   const { data, loading } = useApiResource<Page<DocumentItem>>("documents?page=1&page_size=100");
   const completed = (data?.items ?? []).filter((d) => d.status === "completed");
@@ -23,7 +25,7 @@ export function DocumentFilter({
       id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={inputClass}
+      className={compact ? `${inputClass} py-1.5 text-sm` : inputClass}
       disabled={loading && !data}
     >
       <option value="">All my documents</option>
