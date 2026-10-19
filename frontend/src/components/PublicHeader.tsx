@@ -54,7 +54,7 @@ export function PublicFooter() {
           <Link href="/#features" className="block text-muted hover:text-fg">Features</Link>
           <Link href="/architecture" className="block text-muted hover:text-fg">Architecture</Link>
           <a href={GITHUB_URL} className="block text-muted hover:text-fg" rel="noopener noreferrer">
-            GitHub <span className="text-xs text-subtle">(link placeholder)</span>
+            GitHub
           </a>
         </nav>
         <nav aria-label="Legal" className="space-y-2">
