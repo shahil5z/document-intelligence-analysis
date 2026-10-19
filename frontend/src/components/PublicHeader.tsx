@@ -4,7 +4,7 @@ import { Logo } from "./Logo";
 
 export function PublicHeader() {
   return (
-    <header className="border-b border-slate-200 bg-white">
+    <header className="border-b border-slate-200 bg-surface">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2">
           <Logo />
@@ -17,7 +17,7 @@ export function PublicHeader() {
           <Link href="/login" className="rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">
             Sign in
           </Link>
-          <Link href="/register" className="rounded-lg bg-brand-600 px-3 py-2 font-medium text-white hover:bg-brand-700">
+          <Link href="/register" className="rounded-lg bg-brand-600 px-3 py-2 font-medium text-white hover:bg-primary-hover">
             Create account
           </Link>
         </nav>
@@ -28,7 +28,7 @@ export function PublicHeader() {
 
 export function PublicFooter() {
   return (
-    <footer className="border-t border-slate-200 bg-white">
+    <footer className="border-t border-slate-200 bg-surface">
       <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-xs text-slate-500 sm:flex-row sm:justify-between sm:px-6">
         <p>Document Intelligence Platform · portfolio project by Shahil Haque</p>
         <p>AI answers can be wrong. Always check the cited passages.</p>

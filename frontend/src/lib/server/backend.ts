@@ -21,9 +21,16 @@ export async function callBackend(
     json?: unknown;
     timeoutMs?: number;
     requestId?: string | null;
+    /** Browser IP to pass on for the API's per-IP limits (needs DIP_CLIENT_IP_SECRET). */
+    clientIp?: string | null;
   } = {},
 ): Promise<BackendResult> {
   const headers = new Headers({ accept: "application/json" });
+  const clientIpSecret = process.env.DIP_CLIENT_IP_SECRET;
+  if (clientIpSecret && init.clientIp) {
+    headers.set("x-dip-client-ip", init.clientIp);
+    headers.set("x-dip-client-secret", clientIpSecret);
+  }
   if (init.token) headers.set("authorization", `Bearer ${init.token}`);
   if (init.json !== undefined) headers.set("content-type", "application/json");
   if (init.requestId) headers.set("x-request-id", init.requestId);
@@ -79,4 +86,15 @@ export function relay(result: BackendResult): NextResponse {
 
 export function errorResponse(status: number, code: string, message: string): NextResponse {
   return NextResponse.json({ error: { code, message } }, { status });
+}
+
+/**
+ * The browser's IP as seen by this server: the first x-forwarded-for entry (set by
+ * Vercel / the local reverse proxy) or x-real-ip. Only forwarded to the API together
+ * with DIP_CLIENT_IP_SECRET, which the API checks; the API ignores it otherwise.
+ */
+export function clientIpOf(request: Request): string | null {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const ip = forwarded || request.headers.get("x-real-ip")?.trim() || "";
+  return /^[0-9a-fA-F:.]{2,45}$/.test(ip) ? ip : null;
 }

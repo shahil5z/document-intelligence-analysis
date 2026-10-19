@@ -1,10 +1,21 @@
 "use client";
 
 import { API_URL, CSRF_HEADER, CSRF_VALUE } from "@/lib/config";
-import { ApiError, apiErrorFromBody } from "@/lib/errors";
-import type { UploadResponse } from "@/lib/types";
+import { ApiError, DEMO_LIMIT_EVENT, apiErrorFromBody, isDemoLimit } from "@/lib/errors";
+import type { DemoStatus, UploadResponse } from "@/lib/types";
 
 const SESSION_EXPIRED_EVENT = "dip:session-expired";
+
+/** Any demo_limit_reached answer opens the "create a free account" modal. */
+export function announceDemoLimit(error: ApiError): void {
+  window.dispatchEvent(new CustomEvent(DEMO_LIMIT_EVENT, { detail: { limit: error.limit, message: error.message } }));
+}
+
+export function onDemoLimit(listener: (detail: { limit: string | null; message: string }) => void): () => void {
+  const handler = (event: Event) => listener((event as CustomEvent).detail);
+  window.addEventListener(DEMO_LIMIT_EVENT, handler);
+  return () => window.removeEventListener(DEMO_LIMIT_EVENT, handler);
+}
 
 export function onSessionExpired(listener: () => void): () => void {
   window.addEventListener(SESSION_EXPIRED_EVENT, listener);
@@ -41,6 +52,7 @@ async function request<T>(url: string, method: string, body?: unknown): Promise<
     if (response.status === 401 && !url.startsWith("/api/auth/")) {
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     }
+    if (isDemoLimit(error)) announceDemoLimit(error);
     throw error;
   }
   return parsed as T;
@@ -59,6 +71,9 @@ export const auth = {
   register: (email: string, password: string) =>
     request<{ authenticated: boolean }>("/api/auth/register", "POST", { email, password }),
   logout: () => request<{ authenticated: boolean }>("/api/auth/logout", "POST"),
+  demo: () => request<{ authenticated: boolean; demo: DemoStatus | null }>("/api/auth/demo", "POST"),
+  convertDemo: (email: string, password: string) =>
+    request<{ authenticated: boolean }>("/api/auth/demo/convert", "POST", { email, password }),
 };
 
 export interface UploadHandle {
@@ -106,7 +121,9 @@ export function uploadDocument(file: File, onProgress: (fraction: number) => voi
         if (retry) headers.set("retry-after", retry);
         const requestId = xhr.getResponseHeader("X-Request-ID");
         if (requestId) headers.set("x-request-id", requestId);
-        reject(apiErrorFromBody(xhr.status, parsed, headers));
+        const error = apiErrorFromBody(xhr.status, parsed, headers);
+        if (isDemoLimit(error)) announceDemoLimit(error);
+        reject(error);
       };
       const form = new FormData();
       form.append("file", file, file.name);

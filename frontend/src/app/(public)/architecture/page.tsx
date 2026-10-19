@@ -40,7 +40,7 @@ export default function ArchitecturePage() {
       </div>
       <div className="mt-10 grid gap-6 md:grid-cols-2">
         {SECTIONS.map((section) => (
-          <section key={section.title} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section key={section.title} className="rounded-xl border border-slate-200 bg-surface p-5 shadow-sm">
             <h2 className="font-semibold text-slate-900">{section.title}</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">{section.body}</p>
           </section>

@@ -77,7 +77,7 @@ export function SearchView() {
                     key={m.value}
                     title={m.hint}
                     className={`flex-1 cursor-pointer rounded-md px-2 py-1.5 text-center text-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-brand-600 ${
-                      mode === m.value ? "bg-white font-medium text-slate-900 shadow-sm" : "text-slate-600"
+                      mode === m.value ? "bg-surface font-medium text-slate-900 shadow-sm" : "text-slate-600"
                     }`}
                   >
                     <input

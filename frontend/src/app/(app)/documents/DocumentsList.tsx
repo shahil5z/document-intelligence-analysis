@@ -90,7 +90,7 @@ export function DocumentsList() {
                   <th scope="col" className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
+              <tbody className="divide-y divide-slate-100 bg-surface">
                 {items.map((doc) => (
                   <tr key={doc.id} data-testid="document-row">
                     <td className="max-w-[14rem] px-4 py-3">

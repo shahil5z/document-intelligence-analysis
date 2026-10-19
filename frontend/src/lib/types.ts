@@ -11,6 +11,19 @@ export interface User {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  is_demo?: boolean;
+  demo?: DemoStatus | null;
+}
+
+export interface DemoStatus {
+  questions_used: number;
+  questions_limit: number;
+  questions_remaining: number;
+  uploads_used: number;
+  uploads_limit: number;
+  max_upload_bytes: number;
+  allowed_extensions: string[];
+  expires_at: string | null;
 }
 
 export interface DocumentItem {
@@ -88,6 +101,8 @@ export interface SearchResponse {
 }
 
 export interface Citation {
+  /** The [n] marker in the answer text. */
+  number: number;
   source_id: string;
   chunk_id: string;
   document_id: string;
@@ -107,8 +122,18 @@ export interface AskResponse {
   sources_considered: number;
   model: string | null;
   warnings: string[];
+  partial?: boolean;
+  missing_information?: string | null;
+  insufficient_reason?: "below_threshold" | "model_declined" | "parse_failed" | "no_valid_citations" | null;
+  prompt_version?: string;
+  demo_questions_remaining?: number | null;
 }
 
 export interface ApiErrorBody {
-  error?: { code?: string; message?: string; request_id?: string | null };
+  error?: {
+    code?: string;
+    message?: string;
+    request_id?: string | null;
+    details?: Array<{ limit?: string; [key: string]: unknown }>;
+  };
 }

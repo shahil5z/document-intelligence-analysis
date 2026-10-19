@@ -110,7 +110,7 @@ export function Dashboard() {
             <Link
               key={shortcut.href}
               href={shortcut.href}
-              className="block rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-brand-300 hover:shadow"
+              className="block rounded-xl border border-slate-200 bg-surface p-4 shadow-sm hover:border-brand-300 hover:shadow"
             >
               <p className="font-semibold text-slate-900">{shortcut.title}</p>
               <p className="mt-1 text-sm text-slate-600">{shortcut.body}</p>

@@ -34,7 +34,7 @@ const STACK = [
 export default function LandingPage() {
   return (
     <>
-      <section className="bg-gradient-to-b from-white to-slate-50">
+      <section className="bg-gradient-to-b from-surface to-slate-50">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
           <p className="text-sm font-semibold uppercase tracking-wide text-brand-600">
             Document Intelligence Platform
@@ -65,7 +65,7 @@ export default function LandingPage() {
         <h2 id="features" className="text-2xl font-semibold tracking-tight">What it does</h2>
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
           {FEATURES.map((feature) => (
-            <div key={feature.title} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div key={feature.title} className="rounded-xl border border-slate-200 bg-surface p-5 shadow-sm">
               <h3 className="font-semibold text-slate-900">{feature.title}</h3>
               <p className="mt-2 text-sm text-slate-600">{feature.body}</p>
             </div>
@@ -73,7 +73,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section aria-labelledby="architecture" className="border-y border-slate-200 bg-white">
+      <section aria-labelledby="architecture" className="border-y border-slate-200 bg-surface">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-2">
           <div>
             <h2 id="architecture" className="text-2xl font-semibold tracking-tight">How it is built</h2>
@@ -96,20 +96,20 @@ export default function LandingPage() {
       <section aria-labelledby="security" className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
         <h2 id="security" className="text-2xl font-semibold tracking-tight">Security and privacy</h2>
         <ul className="mt-6 grid gap-4 text-sm text-slate-700 sm:grid-cols-2">
-          <li className="rounded-xl border border-slate-200 bg-white p-5">
+          <li className="rounded-xl border border-slate-200 bg-surface p-5">
             <strong className="block text-slate-900">Session token never exposed to page scripts</strong>
             Your session lives in an HttpOnly, SameSite cookie on this site; state-changing
             requests are protected against CSRF.
           </li>
-          <li className="rounded-xl border border-slate-200 bg-white p-5">
+          <li className="rounded-xl border border-slate-200 bg-surface p-5">
             <strong className="block text-slate-900">Per-user isolation</strong>
             Documents, chunks, searches and answers are filtered by owner in every query.
           </li>
-          <li className="rounded-xl border border-slate-200 bg-white p-5">
+          <li className="rounded-xl border border-slate-200 bg-surface p-5">
             <strong className="block text-slate-900">Validated uploads</strong>
             File type, signature and size are checked before anything is stored.
           </li>
-          <li className="rounded-xl border border-slate-200 bg-white p-5">
+          <li className="rounded-xl border border-slate-200 bg-surface p-5">
             <strong className="block text-slate-900">Honest limits</strong>
             This is a demo: rate limits apply, and AI answers can be wrong. Don&apos;t upload
             confidential documents.

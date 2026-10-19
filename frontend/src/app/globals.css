@@ -1,29 +1,212 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: <html class="dark"> is set before first paint (see layout.tsx). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --color-brand-50: #eef2ff;
-  --color-brand-100: #e0e7ff;
-  --color-brand-500: #6366f1;
-  --color-brand-600: #4f46e5;
-  --color-brand-700: #4338ca;
-  --color-brand-900: #312e81;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Brand: blue #1E6BF0 -> violet #7C3AED (from the logo). */
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dce8fe;
+  --color-brand-200: #b9d1fd;
+  --color-brand-300: #8bb3fb;
+  --color-brand-400: #5a92f7;
+  --color-brand-500: #3a7df4;
+  --color-brand-600: #1e6bf0;
+  --color-brand-700: #1a5bd6;
+  --color-brand-800: #1849a8;
+  --color-brand-900: #163d86;
+  --color-brand-950: #0f2754;
+  --color-violet-brand: #7c3aed;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 1px rgb(15 23 42 / 0.03);
+  --shadow-pop: 0 10px 30px -10px rgb(15 23 42 / 0.25), 0 2px 6px rgb(15 23 42 / 0.08);
+
+  --animate-fade-in: fade-in 160ms ease-out both;
+  --animate-slide-up: slide-up 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 }
 
-html {
+/* Semantic tokens. Contrast (WCAG AA) checked for text on --surface and --background:
+   light fg 17.9:1, muted 7.4:1, subtle 4.9:1, link 5.6:1, white on primary 4.7:1;
+   dark  fg 15.6:1, muted 8.0:1, subtle 5.5:1, link 8.1:1. */
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-link: var(--link);
+  --color-accent: var(--accent);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --background: #f7f8fb;
+  --surface: #ffffff;
+  --surface-2: #f1f3f8;
+  --border: #e3e7ef;
+  --border-strong: #cbd2de;
+  --fg: #0b1220;
+  --muted: #475467;
+  --subtle: #5f6b7f;
+  --primary: #1e6bf0;
+  --primary-hover: #1858cc;
+  --link: #1a5bd6;
+  --accent: #7c3aed;
+  --ring: #1e6bf0;
   color-scheme: light;
 }
 
+.dark {
+  --background: #0b1020;
+  --surface: #111729;
+  --surface-2: #182036;
+  --border: #263049;
+  --border-strong: #35405c;
+  --fg: #e6ecf8;
+  --muted: #a7b1c8;
+  --subtle: #8b96ae;
+  --primary: #1e6bf0;
+  --primary-hover: #1858cc;
+  --link: #8db4ff;
+  --accent: #a78bfa;
+  --ring: #5e90f0;
+  color-scheme: dark;
+
+  /* Remapped palettes so every slate/brand/status utility adapts in dark mode. Solid
+     button colours (brand-600, red-600) stay, so white text keeps its contrast. */
+  --color-slate-50: #0f1527;
+  --color-slate-100: #182036;
+  --color-slate-200: #263049;
+  --color-slate-300: #35405c;
+  --color-slate-400: #64708a;
+  --color-slate-500: #8b96ae;
+  --color-slate-600: #a7b1c8;
+  --color-slate-700: #bcc6da;
+  --color-slate-800: #d5dcea;
+  --color-slate-900: #e6ecf8;
+  --color-slate-950: #f4f7fc;
+
+  --color-brand-50: #13213f;
+  --color-brand-100: #182b52;
+  --color-brand-200: #1f3a6e;
+  --color-brand-300: #2c4f92;
+  --color-brand-400: #4a7fe0;
+  --color-brand-500: #5e90f0;
+  --color-brand-700: #8db4ff;
+  --color-brand-800: #a9c6ff;
+  --color-brand-900: #c9dbff;
+  --color-brand-950: #e3edff;
+
+  --color-red-50: #2a1215;
+  --color-red-100: #3b1519;
+  --color-red-200: #5c1d24;
+  --color-red-300: #7f2a33;
+  --color-red-700: #fca5a5;
+  --color-red-800: #fca5a5;
+  --color-red-900: #fecaca;
+  --color-red-950: #fee2e2;
+
+  --color-amber-50: #2a1e0a;
+  --color-amber-100: #3a290c;
+  --color-amber-200: #5a3f10;
+  --color-amber-300: #7a5715;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fcd34d;
+  --color-amber-900: #fde68a;
+
+  --color-emerald-50: #0b2a1e;
+  --color-emerald-100: #0f3826;
+  --color-emerald-200: #13503a;
+  --color-emerald-300: #1b6b4e;
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #6ee7b7;
+  --color-emerald-900: #a7f3d0;
+
+  --color-blue-50: #0e1f3d;
+  --color-blue-200: #1f3a6e;
+  --color-blue-300: #2c4f92;
+  --color-blue-800: #93c5fd;
+  --color-blue-900: #bfdbfe;
+}
+
+html {
+  background-color: var(--background);
+}
+
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-background text-fg antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
 /* One visible focus style for every interactive element (keyboard users). */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--color-brand-600);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: 0.375rem;
+}
+
+.text-gradient {
+  background: linear-gradient(90deg, #1e6bf0, #7c3aed);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.dark .text-gradient {
+  background: linear-gradient(90deg, #5e90f0, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.bg-brand-gradient {
+  background-image: linear-gradient(135deg, #1e6bf0 0%, #5b4ff0 55%, #7c3aed 100%);
+}
+
+/* Answer markdown */
+.prose-answer p { margin: 0.5rem 0; }
+.prose-answer p:first-child { margin-top: 0; }
+.prose-answer ul, .prose-answer ol { margin: 0.5rem 0; padding-left: 1.25rem; }
+.prose-answer ul { list-style: disc; }
+.prose-answer ol { list-style: decimal; }
+.prose-answer li { margin: 0.2rem 0; }
+.prose-answer code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+}
+.prose-answer h3, .prose-answer h4 { font-weight: 600; margin: 0.75rem 0 0.25rem; }
+
+mark.hl {
+  background: color-mix(in srgb, #facc15 45%, transparent);
+  color: inherit;
+  border-radius: 0.2rem;
+  padding: 0 0.1rem;
+}
+.dark mark.hl {
+  background: color-mix(in srgb, #facc15 30%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -31,6 +214,8 @@ body {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

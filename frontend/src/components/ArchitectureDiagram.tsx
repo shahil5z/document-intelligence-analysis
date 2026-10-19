@@ -1,7 +1,7 @@
 function Box({ title, detail, tone = "slate" }: { title: string; detail: string; tone?: "brand" | "slate" | "emerald" | "amber" }) {
   const tones = {
     brand: "border-brand-200 bg-brand-50",
-    slate: "border-slate-200 bg-white",
+    slate: "border-slate-200 bg-surface",
     emerald: "border-emerald-200 bg-emerald-50",
     amber: "border-amber-200 bg-amber-50",
   } as const;

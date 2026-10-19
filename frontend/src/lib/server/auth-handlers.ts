@@ -2,7 +2,7 @@ import "server-only";
 
 import { NextResponse, type NextRequest } from "next/server";
 
-import { callBackend, errorResponse, relay } from "./backend";
+import { callBackend, clientIpOf, errorResponse, relay } from "./backend";
 import { csrfProblem } from "./csrf";
 import { setSessionCookie } from "./session";
 
@@ -36,7 +36,11 @@ export async function loginAndSetCookie(
   request: NextRequest,
   credentials: Credentials,
 ): Promise<NextResponse> {
-  const result = await callBackend("/auth/login", { method: "POST", json: credentials });
+  const result = await callBackend("/auth/login", {
+    method: "POST",
+    json: credentials,
+    clientIp: clientIpOf(request),
+  });
   const body = result.body as { access_token?: string; expires_in?: number } | null;
   if (result.status !== 200 || !body?.access_token) return relay(result);
   const response = NextResponse.json({ authenticated: true }, { status: 200 });

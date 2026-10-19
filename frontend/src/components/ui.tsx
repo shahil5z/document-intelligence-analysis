@@ -2,42 +2,46 @@ import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
+type Size = "sm" | "md" | "lg";
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-brand-600 text-white hover:bg-brand-700 disabled:bg-brand-600/50 shadow-sm",
+    "bg-primary text-white shadow-card hover:bg-primary-hover disabled:opacity-50",
   secondary:
-    "bg-white text-slate-800 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 disabled:text-slate-400",
-  danger: "bg-red-600 text-white hover:bg-red-700 disabled:bg-red-600/50 shadow-sm",
-  ghost: "text-slate-700 hover:bg-slate-100 disabled:text-slate-400",
+    "bg-surface text-fg ring-1 ring-inset ring-border-strong hover:bg-surface-2 disabled:opacity-50",
+  danger: "bg-red-600 text-white shadow-card hover:bg-red-600/90 disabled:opacity-50",
+  ghost: "text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50",
+};
+
+const SIZES: Record<Size, string> = {
+  sm: "h-8 px-3 text-[13px]",
+  md: "h-9 px-4 text-sm",
+  lg: "h-11 px-5 text-[15px]",
 };
 
 const BASE =
-  "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed";
+  "inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium transition-colors duration-150 disabled:cursor-not-allowed";
 
 export function Button({
   variant = "primary",
+  size = "md",
   className = "",
   ...props
-}: ComponentProps<"button"> & { variant?: Variant }) {
-  return <button className={`${BASE} ${VARIANTS[variant]} ${className}`} {...props} />;
+}: ComponentProps<"button"> & { variant?: Variant; size?: Size }) {
+  return <button className={`${BASE} ${SIZES[size]} ${VARIANTS[variant]} ${className}`} {...props} />;
 }
 
 export function ButtonLink({
   variant = "primary",
+  size = "md",
   className = "",
   ...props
-}: ComponentProps<typeof Link> & { variant?: Variant }) {
-  return <Link className={`${BASE} ${VARIANTS[variant]} ${className}`} {...props} />;
+}: ComponentProps<typeof Link> & { variant?: Variant; size?: Size }) {
+  return <Link className={`${BASE} ${SIZES[size]} ${VARIANTS[variant]} ${className}`} {...props} />;
 }
 
 export function Card({ className = "", ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      className={`rounded-xl border border-slate-200 bg-white shadow-sm ${className}`}
-      {...props}
-    />
-  );
+  return <div className={`rounded-xl border border-border bg-surface shadow-card ${className}`} {...props} />;
 }
 
 export function PageHeader({
@@ -51,17 +55,40 @@ export function PageHeader({
 }) {
   return (
     <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{title}</h1>
-        {description ? <p className="mt-1 text-sm text-slate-600">{description}</p> : null}
+      <div className="min-w-0">
+        <h1 className="text-[22px] font-semibold tracking-tight text-fg sm:text-2xl">{title}</h1>
+        {description ? <p className="mt-1 text-sm text-muted">{description}</p> : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </div>
   );
 }
 
+export function Badge({
+  tone = "neutral",
+  children,
+  className = "",
+}: {
+  tone?: "neutral" | "brand" | "success" | "warning" | "danger";
+  children: ReactNode;
+  className?: string;
+}) {
+  const tones = {
+    neutral: "bg-surface-2 text-muted ring-border",
+    brand: "bg-brand-50 text-brand-700 ring-brand-200",
+    success: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+    warning: "bg-amber-50 text-amber-800 ring-amber-200",
+    danger: "bg-red-50 text-red-800 ring-red-200",
+  } as const;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones[tone]} ${className}`}>
+      {children}
+    </span>
+  );
+}
+
 export function Skeleton({ className = "" }: { className?: string }) {
-  return <div aria-hidden="true" className={`animate-pulse rounded-md bg-slate-200 ${className}`} />;
+  return <div aria-hidden="true" className={`animate-pulse rounded-md bg-surface-2 ${className}`} />;
 }
 
 export function LoadingRows({ rows = 4, label = "Loading" }: { rows?: number; label?: string }) {
@@ -79,24 +106,28 @@ export function EmptyState({
   title,
   description,
   action,
+  icon,
 }: {
   title: string;
   description?: ReactNode;
   action?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
       <div
         aria-hidden="true"
-        className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600"
+        className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-200"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-6 w-6">
-          <path d="M7 3h7l5 5v13H7z" strokeLinejoin="round" />
-          <path d="M14 3v5h5" strokeLinejoin="round" />
-        </svg>
+        {icon ?? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-6 w-6">
+            <path d="M7 3h7l5 5v13H7z" strokeLinejoin="round" />
+            <path d="M14 3v5h5" strokeLinejoin="round" />
+          </svg>
+        )}
       </div>
-      <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-      {description ? <p className="mt-1 max-w-md text-sm text-slate-600">{description}</p> : null}
+      <h2 className="text-base font-semibold text-fg">{title}</h2>
+      {description ? <p className="mt-1 max-w-md text-sm text-muted">{description}</p> : null}
       {action ? <div className="mt-5">{action}</div> : null}
     </div>
   );
@@ -115,12 +146,12 @@ export function Field({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="block text-sm font-medium text-slate-800">
+      <label htmlFor={id} className="block text-sm font-medium text-fg">
         {label}
       </label>
-      <div className="mt-1">{children}</div>
+      <div className="mt-1.5">{children}</div>
       {hint ? (
-        <p id={`${id}-hint`} className="mt-1 text-xs text-slate-500">
+        <p id={`${id}-hint`} className="mt-1 text-xs text-subtle">
           {hint}
         </p>
       ) : null}
@@ -129,7 +160,7 @@ export function Field({
 }
 
 export const inputClass =
-  "block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-brand-600";
+  "block w-full rounded-lg border-0 bg-surface px-3 py-2 text-sm text-fg shadow-card ring-1 ring-inset ring-border-strong placeholder:text-subtle focus:ring-2 focus:ring-inset focus:ring-ring";
 
 export function Spinner({ className = "h-4 w-4" }: { className?: string }) {
   return (

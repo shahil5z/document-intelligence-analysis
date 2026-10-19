@@ -49,7 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen lg:flex">
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
+      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-surface lg:flex lg:flex-col">
         <Link href="/dashboard" className="flex items-center gap-2 px-5 py-5">
           <Logo />
           <span className="text-sm font-semibold leading-tight text-slate-900">
@@ -67,7 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:px-6">
+        <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-slate-200 bg-surface/85 px-4 py-3 backdrop-blur sm:px-6">
           <div className="flex items-center gap-2 lg:hidden">
             <button
               type="button"
@@ -105,7 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         {menuOpen ? (
-          <nav id="mobile-nav" aria-label="Main" className="border-b border-slate-200 bg-white px-3 py-3 lg:hidden">
+          <nav id="mobile-nav" aria-label="Main" className="border-b border-slate-200 bg-surface px-3 py-3 lg:hidden">
             <NavLinks onNavigate={() => setMenuOpen(false)} />
           </nav>
         ) : null}
