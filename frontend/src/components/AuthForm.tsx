@@ -5,7 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import { auth } from "@/lib/client/api";
+import { DemoButton } from "./demo/DemoButton";
 import { ErrorAlert } from "./ErrorAlert";
+import { LogoMark } from "./Logo";
 import { Button, Card, Field, inputClass } from "./ui";
 
 const PASSWORD_MIN_LENGTH = 12;
@@ -46,12 +48,15 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-md flex-col px-4 py-12 sm:py-20">
-      <Card className="p-6 sm:p-8">
-        <h1 className="text-2xl font-semibold tracking-tight">
+    <div className="mx-auto flex max-w-md flex-col px-4 py-12 sm:py-16">
+      <div className="mb-6 flex justify-center">
+        <LogoMark height={44} decorative={false} />
+      </div>
+      <Card className="p-6 shadow-pop sm:p-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">
           {isRegister ? "Create your account" : "Sign in"}
         </h1>
-        <p className="mt-1 text-sm text-slate-600">
+        <p className="mt-1 text-sm text-muted">
           {isRegister
             ? "Your documents stay private to this account."
             : "Welcome back. Sign in to your documents."}
@@ -94,15 +99,24 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
             />
           </Field>
           {error ? <ErrorAlert error={error} /> : null}
-          <Button type="submit" className="w-full" disabled={busy}>
+          <Button type="submit" size="lg" className="w-full" disabled={busy}>
             {busy ? "Please wait…" : isRegister ? "Create account" : "Sign in"}
           </Button>
         </form>
-        <p className="mt-6 text-center text-sm text-slate-600">
+        <div className="my-6 flex items-center gap-3 text-xs text-subtle" aria-hidden="true">
+          <span className="h-px flex-1 bg-border" />
+          or
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <DemoButton className="w-full" size="lg" label="Try the demo without an account" />
+        <p className="mt-2 text-center text-xs text-subtle">
+          1 PDF, 3 questions, deleted after 24 hours.
+        </p>
+        <p className="mt-6 text-center text-sm text-muted">
           {isRegister ? "Already have an account? " : "New here? "}
           <Link
             href={isRegister ? "/login" : "/register"}
-            className="font-medium text-brand-700 hover:underline"
+            className="font-medium text-link hover:underline"
           >
             {isRegister ? "Sign in" : "Create an account"}
           </Link>

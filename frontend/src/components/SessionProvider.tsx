@@ -12,6 +12,10 @@ interface SessionState {
   loading: boolean;
   error: unknown;
   logout: () => Promise<void>;
+  /** Reload /auth/me (e.g. after a demo question or a demo conversion). */
+  refresh: () => Promise<void>;
+  /** Apply the questions-left count an /ask answer reported, without a round trip. */
+  setDemoQuestionsRemaining: (remaining: number) => void;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
@@ -66,6 +70,30 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => onSessionExpired(() => toLogin("expired")), [toLogin]);
 
+  const refresh = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/session", { cache: "no-store" });
+      if (response.ok) setUser((await response.json()) as User);
+    } catch {
+      // keep the current user; the next API call surfaces real problems
+    }
+  }, []);
+
+  const setDemoQuestionsRemaining = useCallback((remaining: number) => {
+    setUser((current) =>
+      current?.demo
+        ? {
+            ...current,
+            demo: {
+              ...current.demo,
+              questions_remaining: remaining,
+              questions_used: current.demo.questions_limit - remaining,
+            },
+          }
+        : current,
+    );
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await auth.logout();
@@ -77,7 +105,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   return (
-    <SessionContext.Provider value={{ user, loading, error, logout }}>
+    <SessionContext.Provider value={{ user, loading, error, logout, refresh, setDemoQuestionsRemaining }}>
       {children}
     </SessionContext.Provider>
   );
