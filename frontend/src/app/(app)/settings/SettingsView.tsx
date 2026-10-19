@@ -5,23 +5,9 @@ import { useSession } from "@/components/SessionProvider";
 import { Button, Card, LoadingRows, PageHeader } from "@/components/ui";
 import { useApiResource } from "@/lib/client/hooks";
 import { formatDate } from "@/lib/format";
+import { ACTION_LABELS, type AuditEntry } from "@/lib/activity";
 import type { Page } from "@/lib/types";
 
-interface AuditEntry {
-  id: string;
-  action: string;
-  resource_type: string | null;
-  created_at: string;
-}
-
-const ACTION_LABELS: Record<string, string> = {
-  "user.registered": "Account created",
-  "user.login": "Signed in",
-  "user.login_failed": "Failed sign-in attempt",
-  "document.uploaded": "Document uploaded",
-  "document.deleted": "Document deleted",
-  "document.reprocess_requested": "Reprocessing requested",
-};
 
 export function SettingsView() {
   const { user, loading, logout } = useSession();

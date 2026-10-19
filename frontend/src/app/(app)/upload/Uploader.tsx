@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { useSession } from "@/components/SessionProvider";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Button, Card, LoadingRows, PageHeader } from "@/components/ui";
+import { useToast } from "@/components/Toast";
+import { Button, ButtonLink, Card, LoadingRows, PageHeader } from "@/components/ui";
 import { api, uploadDocument } from "@/lib/client/api";
 import { useApiResource, useInterval } from "@/lib/client/hooks";
 import { friendlyError, processingFailureMessage } from "@/lib/errors";
@@ -47,8 +49,78 @@ export function validateFile(file: File, policy: UploadPolicy): string | null {
   return null;
 }
 
+type Step = "uploading" | "processing" | "ready";
+
+function stepOf(phase: Phase): { step: Step; failed: boolean } | null {
+  if (phase === "rejected") return null;
+  if (phase === "uploading" || phase === "upload-failed") return { step: "uploading", failed: phase === "upload-failed" };
+  if (phase === "completed") return { step: "ready", failed: false };
+  return { step: "processing", failed: phase === "failed" };
+}
+
+const STEPS: Array<{ id: Step; label: string }> = [
+  { id: "uploading", label: "Uploading" },
+  { id: "processing", label: "Processing" },
+  { id: "ready", label: "Ready" },
+];
+
+/** Uploading → Processing → Ready, with the current step announced to screen readers. */
+function Stepper({ phase }: { phase: Phase }) {
+  const state = stepOf(phase);
+  if (!state) return null;
+  const current = STEPS.findIndex((s) => s.id === state.step);
+  return (
+    <ol className="mt-3 flex items-center gap-2 text-xs" aria-label="Upload progress" data-testid="upload-stepper">
+      {STEPS.map((s, index) => {
+        const done = index < current || (index === current && s.id === "ready");
+        const isCurrent = index === current && s.id !== "ready";
+        const failed = isCurrent && state.failed;
+        return (
+          <li key={s.id} className="flex items-center gap-2" aria-current={index === current ? "step" : undefined}>
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${
+                failed
+                  ? "bg-red-600 text-white"
+                  : done
+                    ? "bg-emerald-600 text-white"
+                    : isCurrent
+                      ? "bg-primary text-white"
+                      : "bg-surface-2 text-subtle ring-1 ring-inset ring-border"
+              }`}
+              aria-hidden="true"
+            >
+              {failed ? "!" : done ? "✓" : index + 1}
+            </span>
+            <span className={done || isCurrent ? "font-medium text-fg" : "text-subtle"}>
+              {s.label}
+              {failed ? " failed" : ""}
+            </span>
+            {index < STEPS.length - 1 ? <span aria-hidden="true" className={`h-px w-6 sm:w-10 ${index < current ? "bg-emerald-500" : "bg-border"}`} /> : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export function Uploader() {
-  const policy = useApiResource<UploadPolicy>("documents/upload-policy");
+  const serverPolicy = useApiResource<UploadPolicy>("documents/upload-policy");
+  const { user, refresh } = useSession();
+  const toast = useToast();
+  const demo = user?.is_demo ? user.demo : null;
+  // Demo sessions get the stricter demo limits (the API enforces them either way).
+  const policy = {
+    ...serverPolicy,
+    data:
+      serverPolicy.data && demo
+        ? {
+            ...serverPolicy.data,
+            allowed_extensions: demo.allowed_extensions,
+            max_upload_size_bytes: Math.min(demo.max_upload_bytes, serverPolicy.data.max_upload_size_bytes),
+          }
+        : serverPolicy.data,
+  };
+  const demoUploadsLeft = demo ? Math.max(0, demo.uploads_limit - demo.uploads_used) : null;
   const [items, setItems] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,10 +135,13 @@ export function Uploader() {
       update(key, { phase: "uploading", progress: 0, error: undefined });
       const handle = uploadDocument(file, (fraction) => update(key, { progress: fraction }));
       handle.promise
-        .then((result) => update(key, { phase: result.status, documentId: result.id, progress: 1 }))
+        .then((result) => {
+          update(key, { phase: result.status, documentId: result.id, progress: 1 });
+          void refresh();
+        })
         .catch((error: unknown) => update(key, { phase: "upload-failed", error }));
     },
-    [update],
+    [update, refresh],
   );
 
   const addFiles = useCallback(
@@ -98,16 +173,18 @@ export function Uploader() {
     for (const item of pollable) {
       api
         .get<DocumentStatusResponse>(`documents/${item.documentId}/status`)
-        .then((status) =>
+        .then((status) => {
           update(item.key, {
             phase: status.status,
             chunkCount: status.chunk_count,
             failure: status.job?.error_message ?? null,
-          }),
-        )
+          });
+          if (status.status === "completed")
+            toast.show({ tone: "success", title: "Document ready", message: `${item.file.name} is indexed. You can ask questions now.` });
+        })
         .catch(() => undefined);
     }
-  }, [pollable, update]);
+  }, [pollable, update, toast]);
 
   useInterval(poll, POLL_MS, pollable.length > 0);
 
@@ -141,6 +218,12 @@ export function Uploader() {
         title="Upload documents"
         description="Files are processed in the background: text extraction, chunking and embedding."
       />
+      {demo ? (
+        <p className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900" data-testid="demo-upload-hint">
+          Demo: {demoUploadsLeft} of {demo.uploads_limit} upload{demo.uploads_limit === 1 ? "" : "s"} left · PDF only · up to{" "}
+          {formatBytes(demo.max_upload_bytes)}. Not sure what to try? Any short PDF such as a policy or a manual works well.
+        </p>
+      ) : null}
       {policy.error ? <ErrorAlert error={policy.error} onRetry={policy.reload} /> : null}
       {policy.loading && !policy.data ? <LoadingRows rows={2} label="Loading upload settings" /> : null}
       {policy.data ? (
@@ -153,15 +236,15 @@ export function Uploader() {
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
             className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-12 text-center transition-colors ${
-              dragging ? "border-brand-500 bg-brand-50" : "border-slate-300 bg-slate-50"
+              dragging ? "border-brand-500 bg-brand-50" : "border-border-strong bg-surface-2 hover:border-brand-300"
             }`}
           >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-10 w-10 text-brand-600" fill="none" stroke="currentColor" strokeWidth="1.6">
               <path d="M12 16V4m0 0-4 4m4-4 4 4" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" strokeLinecap="round" />
             </svg>
-            <p className="mt-3 text-sm font-medium text-slate-900">Drag and drop files here</p>
-            <p className="mt-1 text-xs text-slate-600">
+            <p className="mt-3 text-sm font-medium text-fg">Drag and drop files here</p>
+            <p className="mt-1 text-xs text-muted">
               {policy.data.allowed_extensions.map((e) => e.toUpperCase()).join(", ")} · up to{" "}
               {formatBytes(policy.data.max_upload_size_bytes)} each
             </p>
@@ -175,7 +258,7 @@ export function Uploader() {
               id="file-input"
               ref={inputRef}
               type="file"
-              multiple
+              multiple={!demo}
               accept={accept}
               className="sr-only"
               data-testid="file-input"
@@ -185,7 +268,7 @@ export function Uploader() {
               }}
             />
           </div>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-subtle">
             Demo service: please don&apos;t upload confidential or personal documents.
           </p>
         </Card>
@@ -220,30 +303,32 @@ function UploadRow({
       <Card className="p-4" data-testid="upload-item">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-slate-900">{item.file.name}</p>
-            <p className="text-xs text-slate-500">{formatBytes(item.file.size)}</p>
+            <p className="truncate text-sm font-medium text-fg">{item.file.name}</p>
+            <p className="text-xs text-subtle">{formatBytes(item.file.size)}</p>
           </div>
           {item.phase === "rejected" || item.phase === "upload-failed" ? (
             <span className="rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-800 ring-1 ring-inset ring-red-300">
               {item.phase === "rejected" ? "Not uploaded" : "Upload failed"}
             </span>
           ) : item.phase === "uploading" ? (
-            <span className="text-xs font-medium text-slate-600">Uploading {percent}%</span>
+            <span className="text-xs font-medium text-muted">Uploading {percent}%</span>
           ) : (
             <StatusBadge status={item.phase} />
           )}
         </div>
 
+        <Stepper phase={item.phase} />
+
         {item.phase === "uploading" ? (
           <div
-            className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"
+            className="mt-3 h-2 overflow-hidden rounded-full bg-surface-2"
             role="progressbar"
             aria-label={`Uploading ${item.file.name}`}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={percent}
           >
-            <div className="h-full bg-brand-600 transition-all" style={{ width: `${percent}%` }} />
+            <div className="bg-brand-gradient h-full transition-all" style={{ width: `${percent}%` }} />
           </div>
         ) : null}
 
@@ -262,18 +347,18 @@ function UploadRow({
 
         {item.phase === "completed" && item.documentId ? (
           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-            <span className="text-slate-600">
+            <span className="text-muted">
               Ready{typeof item.chunkCount === "number" ? ` · ${item.chunkCount} chunks indexed` : ""}
             </span>
-            <Link className="font-medium text-brand-700 hover:underline" href={`/documents/${item.documentId}`}>
+            <Link className="font-medium text-link hover:underline" href={`/documents/${item.documentId}`}>
               View
             </Link>
-            <Link className="font-medium text-brand-700 hover:underline" href={`/search?document=${item.documentId}`}>
+            <Link className="font-medium text-link hover:underline" href={`/search?document=${item.documentId}`}>
               Search
             </Link>
-            <Link className="font-medium text-brand-700 hover:underline" href={`/ask?document=${item.documentId}`}>
-              Ask
-            </Link>
+            <ButtonLink size="sm" href={`/ask?document=${item.documentId}`} className="ml-auto" data-testid="ask-cta">
+              Ask questions about this document →
+            </ButtonLink>
           </div>
         ) : null}
 

@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 
 import { DocumentFilter } from "@/components/DocumentFilter";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { Highlight, highlightTerms } from "@/components/Highlight";
 import { Button, Card, EmptyState, Field, LoadingRows, PageHeader, inputClass } from "@/components/ui";
 import { api } from "@/lib/client/api";
 import { pageLabel } from "@/lib/format";
@@ -50,6 +51,8 @@ export function SearchView() {
       setBusy(false);
     }
   }
+
+  const terms = response ? highlightTerms(response.query) : [];
 
   return (
     <>
@@ -134,7 +137,7 @@ export function SearchView() {
             </p>
             <ol className="space-y-3">
               {response.results.map((result, index) => (
-                <ResultCard key={result.chunk_id} result={result} rank={index + 1} />
+                <ResultCard key={result.chunk_id} result={result} rank={index + 1} terms={terms} />
               ))}
             </ol>
           </>
@@ -144,7 +147,7 @@ export function SearchView() {
   );
 }
 
-function ResultCard({ result, rank }: { result: SearchResult; rank: number }) {
+function ResultCard({ result, rank, terms }: { result: SearchResult; rank: number; terms: string[] }) {
   const [expanded, setExpanded] = useState(false);
   const long = result.text.length > 420;
   const text = expanded || !long ? result.text : `${result.text.slice(0, 420)}…`;
@@ -165,7 +168,9 @@ function ResultCard({ result, rank }: { result: SearchResult; rank: number }) {
             {result.similarity !== null ? ` · similarity ${result.similarity.toFixed(2)}` : ""}
           </p>
         </div>
-        <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-800">{text}</p>
+        <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-800">
+          <Highlight text={text} terms={terms} />
+        </p>
         {long ? (
           <button
             type="button"
