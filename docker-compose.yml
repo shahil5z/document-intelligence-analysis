@@ -4,7 +4,7 @@
 # Required in .env: JWT_SECRET_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD.
 
 x-app-environment: &app-environment
-  APP_NAME: ${APP_NAME:-Document Intelligence Platform}
+  APP_NAME: ${APP_NAME:-Document Intelligence & Analysis}
   APP_ENV: ${APP_ENV:-development}
   DEBUG: ${DEBUG:-false}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}

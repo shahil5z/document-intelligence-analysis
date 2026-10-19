@@ -13,7 +13,7 @@
 name: ${COMPOSE_PROJECT_NAME:-dip}
 
 x-app-environment: &app-environment
-  APP_NAME: ${APP_NAME:-Document Intelligence Platform}
+  APP_NAME: ${APP_NAME:-Document Intelligence & Analysis}
   APP_ENV: ${APP_ENV:-production}
   DEBUG: "false"
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
