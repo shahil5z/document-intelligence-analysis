@@ -17,7 +17,11 @@ from app.db.repositories.chunks import ChunkHit
 from app.domain.enums import SearchMode
 from app.processing.chunking import ApproximateTokenCounter
 from app.prompt import system_prompt
-from app.services.answer_service import INSUFFICIENT_EVIDENCE_ANSWER, AnswerService
+from app.services.answer_service import (
+    INSUFFICIENT_EVIDENCE_ANSWER,
+    AnswerService,
+    is_document_level_question,
+)
 from app.services.rag_prompt import INSUFFICIENT_EVIDENCE_SENTINEL
 from app.services.retrieval import RankedChunk
 from app.services.search_service import SearchResult
@@ -204,3 +208,88 @@ def test_blank_question_is_rejected_before_retrieval() -> None:
     with pytest.raises(InvalidQueryError):
         _service(search, MockLLM()).ask(owner=OWNER, question="   ")
     assert search.calls == []
+
+
+# --- document-level / scoped gate (ASK_SCOPED_MIN_SIMILARITY) ---------------------
+
+
+def _gate_service(search: _FakeSearch, llm: MockLLM) -> AnswerService:
+    settings = get_settings().model_copy(
+        update={
+            "min_evidence_similarity": 0.48,
+            "ask_scoped_min_similarity": 0.20,
+            "ask_context_min_similarity": 0.40,
+        }
+    )
+    return AnswerService(search, settings, llm, ApproximateTokenCounter())  # type: ignore[arg-type]
+
+
+STRUCTURED = '{"status": "answered", "answer": "It is a refund policy [1].", "citations": [1]}'
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What is this document about?",
+        "Summarize this document in a few bullet points.",
+        "Give me an overview",
+        "What are the key points?",
+        "what is it about",
+    ],
+)
+def test_document_level_questions_use_the_lower_gate(question: str) -> None:
+    # Measured: "What is this document about?" 0.415 vs an off-topic question 0.422.
+    llm = MockLLM(response=STRUCTURED)
+    search = _FakeSearch([_hit(1, "Northwind refund policy. Returns within 30 days.", 0.415)])
+    result = _gate_service(search, llm).ask(owner=OWNER, question=question)
+    assert len(llm.calls) == 1
+    assert not result.insufficient_evidence
+    assert [c.number for c in result.citations] == [1]
+
+
+def test_off_topic_question_keeps_the_strict_gate_without_llm_call() -> None:
+    llm = MockLLM(response=STRUCTURED)
+    search = _FakeSearch([_hit(1, "Northwind refund policy.", 0.422)])
+    result = _gate_service(search, llm).ask(
+        owner=OWNER, question="What is the boiling point of mercury?"
+    )
+    assert result.insufficient_reason == "below_threshold"
+    assert llm.calls == []
+
+
+def test_question_scoped_to_one_document_uses_the_lower_gate() -> None:
+    llm = MockLLM(response=STRUCTURED)
+    search = _FakeSearch([_hit(1, "Northwind refund policy.", 0.30)])
+    result = _gate_service(search, llm).ask(
+        owner=OWNER, question="Who wrote it?", document_id=uuid.uuid4()
+    )
+    assert len(llm.calls) == 1
+    assert not result.insufficient_evidence
+
+
+def test_scoped_question_below_the_scoped_gate_is_still_refused() -> None:
+    llm = MockLLM(response=STRUCTURED)
+    search = _FakeSearch([_hit(1, "Northwind refund policy.", 0.10)])
+    result = _gate_service(search, llm).ask(
+        owner=OWNER, question="Summarize this document", document_id=uuid.uuid4()
+    )
+    assert result.insufficient_reason == "below_threshold"
+    assert llm.calls == []
+
+
+def test_scoped_model_decline_is_reported_as_model_declined() -> None:
+    declined = '{"status": "insufficient", "answer": "Not covered.", "citations": []}'
+    llm = MockLLM(response=declined)
+    search = _FakeSearch([_hit(1, "Northwind refund policy.", 0.25)])
+    result = _gate_service(search, llm).ask(
+        owner=OWNER, question="What is the capital of France?", document_id=uuid.uuid4()
+    )
+    assert len(llm.calls) == 1
+    assert result.insufficient_reason == "model_declined"
+
+
+def test_is_document_level_question() -> None:
+    assert is_document_level_question("Summarise the contract")
+    assert is_document_level_question("What does this PDF say about fees?")
+    assert not is_document_level_question("How many days do I have to return an item?")
+    assert not is_document_level_question("What is the boiling point of mercury?")

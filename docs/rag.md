@@ -38,9 +38,21 @@ sequenceDiagram
    `MIN_EVIDENCE_SIMILARITY` (cosine). Otherwise the response is
    `insufficient_evidence: true`, `insufficient_reason: "below_threshold"`, a fixed
    message, `model: null`, and **no LLM call** (tested with a mock that records calls).
+   **Document-level and scoped questions** use the lower `ASK_SCOPED_MIN_SIMILARITY`
+   (0.20) instead: a question scoped to one document (`document_id`, e.g. picked in the
+   Ask UI) or about a document as a whole ("summarize this document", "what is this
+   document about?", "key points", `is_document_level_question`). Measured on
+   2026-10-19 with `scripts/check_ask_real.py` against the local stub stack: "What is this
+   document about?" had a best similarity of **0.415** and the off-topic "What is the
+   boiling point of mercury?" **0.422**, so no similarity threshold separates them; the
+   model decides (structured `status: "insufficient"` -> `model_declined`). Off-topic
+   questions without document scope keep the strict gate. Logged as `gate`
+   (`default` / `document_level` / `scoped`) with `best_similarity`.
 3. **Context builder** (`build_context`): once the gate passed, every passage with
    similarity >= `min(ASK_CONTEXT_MIN_SIMILARITY, MIN_EVIDENCE_SIMILARITY)` (0.40) is a
-   candidate, so supporting passages just below the gate reach the model. Drops chunks
+   candidate, so supporting passages just below the gate reach the model (scoped
+   questions: everything retrieved from that document down to the scoped gate; unscoped
+   document-level questions: never below 0.40 except the best passage). Drops chunks
    identical to an earlier one or inside an already selected chunk (overlap); stops at
    `MAX_CONTEXT_TOKENS` (4000). The best source is always kept. Sources are numbered
    `1..n`.

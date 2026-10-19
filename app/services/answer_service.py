@@ -7,7 +7,10 @@ supporting passages -> LLM (structured output requested) -> tolerant parsing
 
 Outcome rules:
 
-* below_threshold: best similarity < MIN_EVIDENCE_SIMILARITY, no LLM call;
+* below_threshold: best similarity < the gate, no LLM call. The gate is
+  MIN_EVIDENCE_SIMILARITY, or the lower ASK_SCOPED_MIN_SIMILARITY when the question is
+  scoped to one document or asks about the document as a whole (see
+  ``is_document_level_question``);
 * answered / partial: the reply has at least one valid citation; invalid citations are
   dropped and reported in ``warnings``; ``partial`` keeps the supported answer and says
   what is missing;
@@ -52,6 +55,21 @@ LLM_NOT_CONFIGURED_MESSAGE = "Question answering is not configured; /search stil
 InsufficientReason = Literal[
     "below_threshold", "model_declined", "parse_failed", "no_valid_citations"
 ]
+
+
+# Questions about a document as a whole: they match no single passage strongly.
+_DOCUMENT_LEVEL = re.compile(
+    r"\b(?:summari[sz]e|summary|overview|tl;?dr|gist|outline)\b"
+    r"|\b(?:main|key)\s+(?:points?|ideas?|topics?|takeaways?|themes?|findings?)\b"
+    r"|\b(?:this|the|my|that)\s+(?:document|file|pdf|text|paper|report|policy|contract)\b"
+    r"|\bwhat\s+is\s+(?:it|this)\s+about\b",
+    re.IGNORECASE,
+)
+
+
+def is_document_level_question(question: str) -> bool:
+    """True for questions about a whole document (summaries, "what is this about")."""
+    return _DOCUMENT_LEVEL.search(question) is not None
 
 
 # User-facing text; it lives in app/prompt/insufficient_evidence.md.
@@ -164,7 +182,16 @@ class AnswerService:
             mode=SearchMode.HYBRID,
             document_id=document_id,
         ).results
+        gate = (
+            "scoped"
+            if document_id is not None
+            else "document_level"
+            if is_document_level_question(question)
+            else "default"
+        )
         threshold = self._settings.min_evidence_similarity
+        if gate != "default":
+            threshold = min(threshold, self._settings.ask_scoped_min_similarity)
         best = max((item.hit.similarity or -1.0 for item in retrieved), default=-1.0)
         if best < threshold:
             return self._insufficient(
@@ -172,9 +199,15 @@ class AnswerService:
                 retrieved=len(retrieved),
                 sources=0,
                 model=None,
-                extra={"threshold": threshold, "best_similarity": round(best, 3)},
+                extra={"threshold": threshold, "best_similarity": round(best, 3), "gate": gate},
             )
+        # Context floor: passages that may support the answer once the gate passed. A
+        # scoped question sends everything retrieved from that one document down to the
+        # gate; an unscoped document-level question never adds passages below the normal
+        # floor (other documents' noise), only the best one when it is lower.
         floor = min(self._settings.ask_context_min_similarity, threshold)
+        if gate == "document_level":
+            floor = min(self._settings.ask_context_min_similarity, best)
         evidence = [
             item
             for item in retrieved
@@ -203,6 +236,8 @@ class AnswerService:
             "parse_mode": reply.mode,
             "model_status": reply.status,
             "invalid_citations_removed": removed,
+            "gate": gate,
+            "best_similarity": round(best, 3),
         }
         if reply.mode == "empty" or (not answer and reply.status != "insufficient"):
             return self._insufficient(

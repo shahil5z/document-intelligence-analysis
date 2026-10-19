@@ -232,6 +232,7 @@ a message that names the variable, never the value.
 | `TOP_K` / `MAX_TOP_K` / `CANDIDATE_K` / `MAX_QUERY_LENGTH` | `5` / `20` / `40` / `1000` | |
 | `MIN_EVIDENCE_SIMILARITY` | `0.48` | if the best passage is below it, `/ask` answers "insufficient evidence" without calling the LLM |
 | `ASK_TOP_K` / `ASK_CONTEXT_MIN_SIMILARITY` | `8` / `0.40` | passages sent to the LLM once the gate passed, and the floor for including them ([docs/rag.md](docs/rag.md)) |
+| `ASK_SCOPED_MIN_SIMILARITY` | `0.20` | gate for questions scoped to one document or about a whole document ("summarize this document"); the LLM decides |
 | `LLM_STRUCTURED_OUTPUT` | `true` | JSON-schema structured output; one automatic retry without it if the endpoint rejects the schema |
 | `RERANKING_ENABLED` / `RERANKER_MODEL` / `RERANK_TOP_K` | `false` / `cross-encoder/ms-marco-MiniLM-L-6-v2` / `20` | optional cross-encoder |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `openai` / `gpt-4o-mini` / `https://api.openai.com/v1` | any OpenAI-compatible endpoint; `none` disables `/ask` |

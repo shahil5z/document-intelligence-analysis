@@ -159,6 +159,13 @@ class Settings(BaseSettings):
     # capped at it.
     ask_top_k: int = Field(default=8, ge=1, le=100)
     ask_context_min_similarity: float = Field(default=0.40, ge=-1.0, le=1.0)
+    # Gate used instead of MIN_EVIDENCE_SIMILARITY when the question is scoped to one
+    # document (document_id) or is about the document as a whole ("summarize this
+    # document", "what is this document about?"). Such questions match no single passage
+    # well: measured 2026-10-19 on the check_ask_real.py sample, "What is this document
+    # about?" scored 0.415 while an off-topic question scored 0.422, so similarity cannot
+    # separate them; the LLM decides instead (it may answer "insufficient").
+    ask_scoped_min_similarity: float = Field(default=0.20, ge=-1.0, le=1.0)
 
     reranking_enabled: bool = False
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
