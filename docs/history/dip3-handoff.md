@@ -3,7 +3,7 @@
 > **Historical stage record.** The numbers and NOT VERIFIED items below describe the
 > state at the end of this stage and are kept unchanged as history. The current,
 > verified state of the whole system (tests, Docker, CI, security, benchmark) is in
-> [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md); where this file disagrees with
+> [verification report](final-project-report.md); where this file disagrees with
 > it, the final report and the code win.
 >
 > Corrections found in the final audit: the DIP3 work was later committed as
@@ -21,7 +21,7 @@ no remote). Verified on Windows 11 with Python 3.12.15, a local PostgreSQL 16.2 
 pgvector 0.6.2 (no Docker) and no Redis. Everything that needs Docker, Redis, a real
 LLM or GitHub is marked **NOT VERIFIED - Docker unavailable** or **NOT VERIFIED**.
 
-DIP1/DIP2 state: [DIP1_HANDOFF.md](DIP1_HANDOFF.md), [DIP2_HANDOFF.md](DIP2_HANDOFF.md).
+DIP1/DIP2 state: [dip1-handoff.md](dip1-handoff.md), [dip2-handoff.md](dip2-handoff.md).
 This file replaces the earlier DIP3 plan.
 
 ## Discrepancies found in the audit
@@ -100,7 +100,7 @@ Modified: `app/core/{config,errors,middleware}.py`, `app/main.py`,
   the (size-limited) body was received.
 - If the last allowed attempt cannot write its result, the job stays `processing`.
 - Redis password visible in the `redis-server` command line.
-- Performance not measured ([docs/performance.md](docs/performance.md)).
+- Performance not measured ([docs/performance.md](../performance.md)).
 
 ## Secrets
 

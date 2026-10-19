@@ -5,12 +5,12 @@ This is the generic runbook for `docker-compose.prod.yml`. It works on any Ubunt
 [oracle-cloud-deployment.md](oracle-cloud-deployment.md), the frontend in
 [vercel-deployment.md](vercel-deployment.md), backups in
 [backup-and-recovery.md](backup-and-recovery.md), and the click-by-click list in
-[MANUAL_DEPLOYMENT_CHECKLIST.md](../MANUAL_DEPLOYMENT_CHECKLIST.md).
+[deployment checklist](deployment-checklist.md).
 
 Status: **CONFIGURED BUT NOT DEPLOYED.** No VM, domain or real OpenAI key was available
 while this was built. The stack below was run **locally** with a production-like override
 (local Caddy CA, ports 8080/8443, stub LLM). See
-[FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md) for what was verified and how.
+[verification report](history/final-project-report.md) for what was verified and how.
 
 ## Topology
 

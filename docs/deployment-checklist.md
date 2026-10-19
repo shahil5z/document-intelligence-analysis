@@ -2,9 +2,9 @@
 
 Everything here needs your accounts (Oracle Cloud, a DNS name, Vercel, GitHub, OpenAI)
 and was **not** done while building the project. Tick the boxes in order. Details:
-[docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md),
-[docs/vercel-deployment.md](docs/vercel-deployment.md),
-[docs/production-deployment.md](docs/production-deployment.md).
+[docs/oracle-cloud-deployment.md](oracle-cloud-deployment.md),
+[docs/vercel-deployment.md](vercel-deployment.md),
+[docs/production-deployment.md](production-deployment.md).
 
 ## A. Repository
 

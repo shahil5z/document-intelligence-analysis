@@ -3,7 +3,7 @@
 Scope: the final system (DIP1 + DIP2 + DIP3 + final fixes + production phase: Next.js
 frontend, production compose, Caddy, ops scripts). Every control below names
 where it lives and what tests it. Verification numbers are in
-[FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md).
+[verification report](history/final-project-report.md).
 
 ## Authentication and authorization
 
@@ -143,7 +143,7 @@ is no entailment or second-pass check.
 - Logs: no secrets or document text (live check: 0 occurrences, see observability.md).
 - Repository audit: tracked files and full history contain only placeholders, local
   test credentials (`dip`) and fake test keys; no real key pattern
-  ([report](../FINAL_PROJECT_REPORT.md#9-security-audit)).
+  ([report](history/final-project-report.md#9-security-audit)).
 
 ## Containers and supply chain
 

@@ -128,7 +128,7 @@ are never returned.
 Errors: 401 without a token, 404 for a foreign/missing `document_id`, 422 validation,
 503 if the embedding model cannot be loaded or run (semantic/hybrid only; keyword search
 does not need the model). The first semantic query in a fresh API process loads the
-model (several seconds on CPU; one measurement in the compose run is in DIP2_HANDOFF.md).
+model (several seconds on CPU; one measurement in the compose run is in [history/dip2-handoff.md](history/dip2-handoff.md)).
 
 ## Evaluation
 

@@ -3,17 +3,17 @@
 > **Historical stage record.** The numbers and NOT VERIFIED items below describe the
 > state at the end of this stage and are kept unchanged as history. The current,
 > verified state of the whole system (tests, Docker, CI, security, benchmark) is in
-> [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md); where this file disagrees with
+> [verification report](final-project-report.md); where this file disagrees with
 > it, the final report and the code win.
 >
 > Superseded since DIP1: Redis no longer receives `--requirepass` on the command line
 > (0600 config file); rate limits, metrics and hardening were added in DIP3; the
 > stale-job reconciler and terminal failure on retry exhaustion were added in the
-> final phase; the "DIP2" plan section is implemented (see DIP2_HANDOFF.md).
+> final phase; the "DIP2" plan section is implemented (see dip2-handoff.md).
 
 This is the single hand-off document for DIP1 and the starting point for DIP2
-(it replaces the former `DIP2_HANDOFF.md`). DIP3 specifics are in
-[DIP3_HANDOFF.md](DIP3_HANDOFF.md). Everything listed as implemented was executed;
+(it replaces the former `dip2-handoff.md`). DIP3 specifics are in
+[dip3-handoff.md](dip3-handoff.md). Everything listed as implemented was executed;
 anything not executed is marked as such.
 
 ## 1. What was implemented
@@ -51,7 +51,7 @@ client -> FastAPI (routes -> services -> repositories -> SQLAlchemy) -> PostgreS
 
 Sync SQLAlchemy and `def` routes (threadpool) everywhere, shared by API, worker and CLI
 (ADR-005). Services own transactions and commit explicitly; repositories never commit.
-Diagrams: [docs/architecture.md](docs/architecture.md). Decisions: [docs/adr/](docs/adr).
+Diagrams: [docs/architecture.md](../architecture.md). Decisions: [docs/adr/](../adr).
 
 ## 3. Directory structure
 
@@ -157,7 +157,7 @@ From `.env.example`: `APP_NAME`, `APP_ENV`, `DEBUG`, `LOG_LEVEL`, `API_PORT`,
 `MAX_UPLOAD_SIZE_BYTES`, `ALLOWED_EXTENSIONS`, `ALLOWED_CONTENT_TYPES`,
 `CORS_ALLOWED_ORIGINS`, `OPENAI_API_KEY`; commented optional overrides `DATABASE_URL`,
 `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `TEST_DATABASE_URL`,
-`TEST_REDIS_URL`. Defaults and rules: [README.md](README.md#environment-variables).
+`TEST_REDIS_URL`. Defaults and rules: [README.md](../../README.md#environment-variables).
 
 ## 11. Commands
 
@@ -201,7 +201,7 @@ The final runs above had no failures. Failures seen during development and fixed
   sample password `short` also occurs in the error type `string_too_short`; the test now
   uses a distinctive value.
 - DIP1: the compose `migrate` service timed out reaching Postgres because of stale
-  `iptables-legacy` rules on the dev box (host issue, see DIP3_HANDOFF).
+  `iptables-legacy` rules on the dev box (host issue, see dip3-handoff.md).
 - DIP1: with Redis stopped an upload took about 3 minutes (Celery result-backend
   reconnects); fixed with `ignore_result=True` and socket timeouts (about 8 s, measured once).
 - This revision: ruff `I001` (import order) in a new test, fixed with `ruff --fix`.

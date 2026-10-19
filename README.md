@@ -23,7 +23,7 @@ is scoped to the document owner inside SQL.
   paint), sidebar on desktop and bottom navigation on mobile, chat-style Ask with
   clickable `[n]` citation chips, upload stepper, toasts, Impressum/Privacy templates.
 
-What was verified, with numbers, is in [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md)
+What was verified, with numbers, is in [verification report](docs/history/final-project-report.md)
 (the single source of truth). OCR is **not implemented**: scanned PDFs fail with an
 explicit message.
 
@@ -58,7 +58,7 @@ Also: `login-*`, `impressum-*`, `dashboard-mobile-*`, `demo-upload-ready-dark.pn
 
 **Not deployed yet.** There is no public URL. Everything needed is configured
 (compose file, Caddy, scripts, workflows, docs); the remaining steps need the owner's
-Oracle Cloud, Vercel and GitHub accounts: [MANUAL_DEPLOYMENT_CHECKLIST.md](MANUAL_DEPLOYMENT_CHECKLIST.md).
+Oracle Cloud, Vercel and GitHub accounts: [docs/deployment-checklist.md](docs/deployment-checklist.md).
 
 | | URL |
 | --- | --- |
@@ -286,7 +286,7 @@ scripts/e2e_prod_local.sh          # production-like stack + Playwright (bash)
 python3 scripts/production_smoke_test.py --base-url https://<API_DOMAIN> --register
 ```
 
-Results (numbers in [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md)):
+Results (numbers in [verification report](docs/history/final-project-report.md)):
 backend 414 passed, 0 skipped, 96% coverage (real PostgreSQL + pgvector, Redis, S3-compatible server); ruff, format and mypy strict clean; frontend lint/typecheck/build clean; Playwright 10/10 against the production-like stack; production smoke test 13/13 checks. Not run: GitHub Actions, Windows, real OpenAI, real Oracle/Vercel.
 Layers and commands: [docs/testing.md](docs/testing.md).
 

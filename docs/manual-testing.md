@@ -16,7 +16,7 @@ a minute.
 
 Status of this checklist: the commands were written for Windows and **have not been
 executed on Windows** by the author of this file; the equivalent flow ran on Linux via
-`scripts/smoke_test.py` (see [FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md)).
+`scripts/smoke_test.py` (see [verification report](history/final-project-report.md)).
 
 ---
 
@@ -348,7 +348,7 @@ Safe procedure; the key never appears on screen or in git:
    `status_code: 401` (no key, prompt or response body is logged).
 
 No paid request was made while preparing this project; the real-OpenAI path is
-**NOT VERIFIED** (see FINAL_PROJECT_REPORT.md).
+**NOT VERIFIED** (see [history/final-project-report.md](history/final-project-report.md)).
 
 ---
 

@@ -28,7 +28,7 @@ in a 0600 config file instead of the command line.
 Verified on 2026-10-18 (Linux, Docker Compose): `build --no-cache` 56 s, `up -d --wait`
 on fresh volumes ~40 s, all services healthy, smoke test 41/41 checks passed, Redis
 stop/start recovers (API readiness and worker reconnect), see
-[FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md#8-docker-verification).
+[verification report](history/final-project-report.md#8-docker-verification).
 
 ## Image digests
 

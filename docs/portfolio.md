@@ -2,8 +2,8 @@
 
 Interview-oriented summary. Each claim below was executed; anything not run is marked
 **NOT VERIFIED** and anything not quantified is marked **Not measured**. Full evidence:
-[FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md) (stage history in the DIP1-3
-handoffs).
+[verification report](history/final-project-report.md) (stage history in the [DIP1-3
+handoffs](history/)).
 
 ## One-line summary
 
@@ -17,7 +17,7 @@ scoped to the document owner inside SQL.
 | Problem | Approach | Evidence |
 | --- | --- | --- |
 | One user must never see another's documents | Owner filter inside every repository query; foreign ids return 404 | API tests + smoke test |
-| Retrieval must not leak across tenants | `owner_id` + `status='completed'` predicates inside the semantic and keyword SQL (not post-filtering); foreign `document_id` -> 404 | API tests with two users; compose smoke test (see DIP2_HANDOFF) |
+| Retrieval must not leak across tenants | `owner_id` + `status='completed'` predicates inside the semantic and keyword SQL (not post-filtering); foreign `document_id` -> 404 | API tests with two users; compose smoke test (see [DIP2 handoff](history/dip2-handoff.md)) |
 | Uploads must not trust the client | allow-lists, magic bytes, streamed size limit, sanitised names, server keys | DIP1 tests |
 | Files can be hostile or useless | encrypted / corrupt / scanned / binary / zip-bomb DOCX all fail with a fixed safe message; no parser text reaches the API | extraction unit tests + pipeline integration tests |
 | Jobs must be observable and re-runnable | DB job state machine + `stage` column; index step replaces chunks under a row lock; `/reprocess` | integration tests (reprocess, redelivery, deleted during processing) |

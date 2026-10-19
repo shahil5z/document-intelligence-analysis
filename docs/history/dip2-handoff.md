@@ -3,7 +3,7 @@
 > **Historical stage record.** The numbers and NOT VERIFIED items below describe the
 > state at the end of this stage and are kept unchanged as history. The current,
 > verified state of the whole system (tests, Docker, CI, security, benchmark) is in
-> [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md); where this file disagrees with
+> [verification report](final-project-report.md); where this file disagrees with
 > it, the final report and the code win.
 >
 > Corrections found in the final audit: an empty LLM reply is treated as
@@ -52,7 +52,7 @@ Not implemented: OCR (scanned PDFs fail with "The document contains no extractab
   `LLM_BASE_URL`, `LLM_TIMEOUT_SECONDS`; the key is still `OPENAI_API_KEY`.
 - **`build_default_pipeline` (DIP1) kept** as the integrity-only pipeline; the worker
   now uses `build_indexing_pipeline`.
-- **`DIP3_HANDOFF.md` already existed**; it was updated, not created.
+- **`dip3-handoff.md` already existed**; it was updated, not created.
 
 ## 3. Database
 
@@ -114,7 +114,7 @@ Project `dip2verify`, image built from this branch (1.57 GB, torch `2.14.1+cpu`)
 
 **First attempt failed** and is kept here because it shows real behaviour: the worker
 could not resolve `huggingface.co` from the compose network on this box (host network
-quirk, like the iptables one noted in DIP3_HANDOFF). The load raised `OSError`, which the
+quirk, like the iptables one noted in dip3-handoff.md). The load raised `OSError`, which the
 pipeline treats as transient; the job retried with backoff through 4 attempts, stayed at
 `stage=chunk`, and ended `failed` with "Processing failed after several attempts". The
 smoke test timed out (300 s). Fix for the run: pre-seed the `model_cache` volume from a
@@ -124,7 +124,7 @@ host cache and set `HF_HUB_OFFLINE=1` (now a documented compose variable).
 
 `scripts/evaluate_retrieval.py` with the real model on 18 queries / 6 documents
 (`CHUNK_SIZE=120`, `CHUNK_OVERLAP=20` so documents have several chunks). Full tables in
-[docs/retrieval.md](docs/retrieval.md#evaluation); summary: hybrid Recall@5 0.944,
+[docs/retrieval.md](../retrieval.md#evaluation); summary: hybrid Recall@5 0.944,
 MRR@5 0.889; semantic MRR@5 0.889; keyword MRR@5 0.917. With the hashing embedder hybrid
 clearly beats semantic (MRR 0.880 vs 0.745). The set is small and synthetic; differences
 of one query are 0.056 recall.

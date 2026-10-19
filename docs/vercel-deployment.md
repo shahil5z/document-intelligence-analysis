@@ -4,7 +4,7 @@ The Next.js app in `frontend/` (App Router, TypeScript, Tailwind) is designed fo
 Vercel. Status: **CONFIGURED BUT NOT DEPLOYED** (no Vercel account was available).
 `npm run lint`, `npm run typecheck` and `npm run build` pass locally, and the Playwright
 suite passes against `next start` in front of the production compose stack (see
-[FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md)).
+[verification report](history/final-project-report.md)).
 
 ## How the frontend talks to the API
 

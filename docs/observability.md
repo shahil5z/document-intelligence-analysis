@@ -13,7 +13,7 @@ Verified on the final compose run: after a full smoke test the combined logs of 
 services contained 0 occurrences of the JWT secret, the PostgreSQL password, the Redis
 password, the (fake) OpenAI key, the uploaded document text, the generated answer,
 `Bearer ey...` tokens, user e-mail addresses or the word `password`
-([FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md#9-security-audit)).
+([verification report](history/final-project-report.md#9-security-audit)).
 
 Events worth alerting on:
 

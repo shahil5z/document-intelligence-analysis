@@ -60,7 +60,7 @@ Manual checklist for Windows: [manual-testing.md](manual-testing.md).
 | --- | --- | --- |
 | `final` before the final-phase changes | Linux box, Python 3.12.15, PostgreSQL 16.15 + pgvector 0.8.7 | 333 passed, 0 skipped, 95% coverage |
 | **`final` after the final-phase changes** | same, plus Redis 7.4.11 with password (`TEST_REDIS_URL`) | **364 passed, 0 skipped, 96% coverage** (3370 statements, 148 missed), 57.7 s |
-| DB-backed tests against pgvector 0.6.2 (fallback path) | PostgreSQL 16 + pgvector 0.6.2 | see [FINAL_PROJECT_REPORT.md](../FINAL_PROJECT_REPORT.md#7-verification-results) |
+| DB-backed tests against pgvector 0.6.2 (fallback path) | PostgreSQL 16 + pgvector 0.6.2 | see [verification report](history/final-project-report.md#7-verification-results) |
 | DIP3, historical | Windows 11, PostgreSQL 16.2 + pgvector 0.6.2 | 330 passed, 3 skipped, 95% coverage (not repeated) |
 
 ruff check: clean; ruff format: 170 files formatted; mypy (strict): no issues in 147

@@ -62,7 +62,7 @@ normal account in place (documents kept). Beat task `users.cleanup_expired_demos
 `0003` (columns + partial index). UI: "Try the demo" on landing/login/register, banner
 "Demo: N of 3 questions left", upload hints, "Create a free account to continue" modal
 on any `demo_limit_reached` (4th question, 2nd upload) and from the banner, inline
-conversion. Design: [docs/demo-mode.md](docs/demo-mode.md).
+conversion. Design: [docs/demo-mode.md](../demo-mode.md).
 
 ### U3. Rate limits (public-demo defaults)
 
@@ -140,7 +140,7 @@ kills the group on exit and refuses to start when 3000 is busy. "Create account"
 showed on 375px (class conflict) and "Sign in" wrapped; the sticky Ask composer was
 see-through on mobile.
 
-Screenshots (Playwright, local stub LLM): `docs/screenshots/` and `/workspace/ux-screens/`
+Screenshots (Playwright, local stub LLM): `docs/screenshots/` (curated subset kept in the repository)
 (32 files): `landing|login|impressum-{desktop,mobile}-{dark,light}`,
 `ask-citations-{dark,light}`, `ask-mobile-{dark,light}`, `dashboard-desktop-{dark,light}`,
 `dashboard-mobile-{dark,light}`, `demo-limit-modal-{dark,light}`,
@@ -193,7 +193,7 @@ untracked and not in it).
 | Frontend | `frontend/` (Next.js 16 App Router, TypeScript, Tailwind 4, Playwright) | VERIFIED LOCALLY; Vercel CONFIGURED BUT NOT DEPLOYED |
 | Auth decision | `docs/adr/ADR-006-frontend-auth-bff.md` | - |
 | CI/CD | `.github/workflows/ci.yml` (+ shellcheck, frontend, optional e2e, prod compose/Caddy validation), `.github/workflows/deploy.yml` | actionlint clean; never run on GitHub: NOT VERIFIED |
-| Docs | README (17 sections), `docs/{local-development,production-deployment,oracle-cloud-deployment,vercel-deployment,backup-and-recovery,security}.md`, `docs/{architecture,manual-testing,deployment}.md` updated, `MANUAL_DEPLOYMENT_CHECKLIST.md`, this report | - |
+| Docs | README (17 sections), `docs/{local-development,production-deployment,oracle-cloud-deployment,vercel-deployment,backup-and-recovery,security}.md`, `docs/{architecture,manual-testing,deployment}.md` updated, `docs/deployment-checklist.md`, this report | - |
 
 The backend was not rewritten: all backend changes are additive (new token type,
 new storage backend, gunicorn config, placeholder detection for `<...>` values). The
@@ -332,7 +332,7 @@ Pure-ASGI middleware chain RequestContext -> SecurityHeaders -> BodySizeLimit ->
 routes -> services -> owner-scoped repositories -> SQLAlchemy 2 (sync, psycopg 3).
 Worker: Celery (acks_late, bounded claims, 240 s soft / 300 s hard limits) with
 embedded beat for the stale-job reconciler; metrics exporter on 9100. Redis: broker +
-fixed-window rate limits. Details: [docs/architecture.md](docs/architecture.md).
+fixed-window rate limits. Details: [docs/architecture.md](../architecture.md).
 
 ## 5. Handoff claims vs code (discrepancies)
 
@@ -451,7 +451,7 @@ OpenAI NOT VERIFIED** (no real key here; nothing contacted OpenAI from the stack
 manual Python check inside the container mistakenly instantiated the legacy DIP1 SDK
 embedding adapter with the fake key; the request failed at DNS resolution
 ("Temporary failure in name resolution"), so nothing reached OpenAI. Procedure for
-the user: [docs/manual-testing.md](docs/manual-testing.md#real-openai-test-optional-costs-money),
+the user: [docs/manual-testing.md](../manual-testing.md#real-openai-test-optional-costs-money),
 `scripts/smoke_test.py --real-llm`.
 
 ## 11. CI
@@ -515,7 +515,7 @@ benchmark only.
 
 48 files, +2513 / -590. New: `app/workers/reconcile.py`, `tests/integration/test_stale_jobs.py`,
 `scripts/benchmark.py`, `scripts/stub_llm_server.py`, `docker-compose.stub-llm.yml`,
-`docs/manual-testing.md`, `FINAL_PROJECT_REPORT.md`. Modified: `.dockerignore`,
+`docs/manual-testing.md`, `docs/history/final-project-report.md`. Modified: `.dockerignore`,
 `.env.example`, `.github/workflows/ci.yml`, `Dockerfile`, `docker-compose.yml`,
 `README.md`, the three handoffs, `app/ai/{embeddings,factory,reranker}.py`,
 `app/api/dependencies/rate_limit.py`, `app/api/routes/health.py`, `app/cli.py`,
@@ -593,4 +593,4 @@ Object Storage).
 | Production stack (local prod-like) | VERIFIED LOCALLY | E2E 10/10, smoke 13/13, deploy.sh RC 0 |
 | Backup / restore | VERIFIED LOCALLY | round trip + live drill |
 | arm64 | VERIFIED LOCALLY (QEMU) | build, import, embedding, unit tests |
-| Live deployment | CONFIGURED BUT NOT DEPLOYED | MANUAL_DEPLOYMENT_CHECKLIST.md |
+| Live deployment | CONFIGURED BUT NOT DEPLOYED | docs/deployment-checklist.md |
