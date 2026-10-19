@@ -125,6 +125,15 @@ supporting passages down to 0.40 are sent along. The gap is small and the sample
 recalibrate when the model, chunk size or corpus changes. The tests use 0.15 because
 the hashing test embedder produces lower similarities.
 
+**Follow-up (2026-10-19):** running `scripts/check_ask_real.py` against the local stub
+stack showed that the calibration set did not generalise: on its generated one-chunk
+sample, "What is this document about?" scored **0.415** (below the gate) and the
+off-topic question **0.422**. A whole-document question cannot be separated from an
+off-topic one by passage similarity, so document-level and document-scoped questions now
+use `ASK_SCOPED_MIN_SIMILARITY` (0.20) and the model decides (see Flow step 2). After the
+change the same check passes 3/3 (document-level and specific answered with `[1]`,
+off-topic refused without an LLM call). Against the stub only; real OpenAI NOT VERIFIED.
+
 ## Prompt layout (`app/prompt/`)
 
 | File | Purpose |

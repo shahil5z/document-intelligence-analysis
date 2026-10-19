@@ -1,4 +1,6 @@
-# Final project report: Document Intelligence Platform
+# Final project report: Document Intelligence & Analysis
+
+(Formerly "Document Intelligence Platform"; repository and package slugs unchanged.)
 
 Single source of truth for what exists and what was verified. Branch `final`.
 Everything ran on 2026-10-18 on the Linux build box (8 vCPU Intel Xeon, 15 GiB RAM,
@@ -11,7 +13,172 @@ Labels: **VERIFIED LOCALLY** (run here, result shown), **CONFIGURED BUT NOT DEPL
 the production part) uses the earlier words PASS / PARTIAL with the same meaning as
 VERIFIED LOCALLY / partially verified.
 
-## P. Production phase (latest)
+## U. UX round: Ask fix, demo mode, rename, theme, enterprise UI (latest)
+
+Run on 2026-10-18/19 on the same Linux build box. Labels as below. Nothing in this round
+ran against real OpenAI, on Windows, on Vercel, on Oracle Cloud or on GitHub Actions.
+
+### U1. "Not enough evidence" on every question: root cause and fix
+
+- **Evidence**: the reported log line `ask.insufficient_evidence ... llm_called: true`
+  was emitted by the old code *only* when the reply started with `INSUFFICIENT_EVIDENCE`
+  or was empty, so the model itself declined. Causes in code and data: an all-or-nothing
+  prompt at temperature 0; every passage had to reach 0.48 individually (document-level
+  questions scored 0.507-0.584); the Docker stub always answered, masking it. The real
+  gpt-4o-mini replies were **not** inspected (no key here): inferred from the code path.
+- **Fix** (`a864594`): structured output (strict JSON schema) with one fallback retry
+  on 400/422; tolerant parser (`app/services/answer_parsing.py`: JSON, fenced, prose +
+  JSON, alternative keys, `[S1]`/`[1-3]`/`[Source 1]`/`【1】`); answers are kept with
+  at least one valid citation, invalid ones removed; `partial` + `missing_information`;
+  `insufficient_reason` (`below_threshold` / `model_declined` / `parse_failed` /
+  `no_valid_citations`) logged with counts only; gate on the best passage, supporting
+  passages down to 0.40, `ASK_TOP_K=8`, `MAX_CONTEXT_TOKENS=4000`,
+  `LLM_MAX_OUTPUT_TOKENS=900`.
+- **Follow-up found by the one-command check** (`b58b306`): against the stub stack
+  "What is this document about?" scored 0.415 vs 0.422 off-topic, so it was still
+  refused. Document-level questions and questions scoped to one document now use
+  `ASK_SCOPED_MIN_SIMILARITY=0.20` and the model decides; unscoped off-topic questions
+  keep the 0.48 gate (logged as `gate`).
+- **Prompt folder** `app/prompt/` (`system.md`, `answer_instructions.md`,
+  `insufficient_evidence.md`, `response_schema.json`, loader, `PROMPT_VERSION =
+  "2026-10-18.2"`, README), tested by `tests/unit/test_prompt_files.py`.
+- **Replay fixture**: `tests/fixtures/llm_replies.json`, 18 hand-written replies
+  (**not** captured OpenAI output) replayed through the real parser/validator in
+  `tests/unit/test_llm_replay.py`.
+- **One-command real check**: `python scripts/check_ask_real.py --base-url <api>`
+  (throwaway user, sample or `--pdf`, document-level + specific + off-topic question,
+  exit 1 on failure). Against the local stub stack: **RESULT PASS, 3/3** after the
+  follow-up (FAIL 1/3 before it). Against real OpenAI: **NOT VERIFIED**: the user's to run.
+
+### U2. Demo mode (`0f8805b` backend, frontend in `36f4788`..`5242193`)
+
+`POST /auth/demo` creates an ephemeral user (`demo-<hex>@demo.invalid`, random
+password, token lifetime min(TTL, 2 h)); server-side counters with atomic
+`UPDATE ... WHERE used < limit RETURNING`: 3 questions (refunded when the LLM was not
+called or failed), 1 upload, PDF only, 5 MB; 403 `demo_limit_reached` with
+`details[0].limit`. Login refuses demo users. `POST /auth/demo/convert` turns it into a
+normal account in place (documents kept). Beat task `users.cleanup_expired_demos`
+(every 900 s, batches of 200) deletes expired demo users and their files. Migration
+`0003` (columns + partial index). UI: "Try the demo" on landing/login/register, banner
+"Demo: N of 3 questions left", upload hints, "Create a free account to continue" modal
+on any `demo_limit_reached` (4th question, 2nd upload) and from the banner, inline
+conversion. Design: [docs/demo-mode.md](docs/demo-mode.md).
+
+### U3. Rate limits (public-demo defaults)
+
+| Endpoint | Scopes and defaults | Key | Redis down |
+| --- | --- | --- | --- |
+| register / demo convert | `REGISTER` 5/minute + `REGISTER_DAILY` 20/day | IP | closed (503) |
+| login | `LOGIN` 10/minute, `LOGIN_PER_EMAIL` 5/minute | IP / e-mail | closed |
+| `POST /auth/demo` | `DEMO` 3/day, `DEMO_GLOBAL` 200/day | IP / global | closed |
+| upload token | `UPLOAD_TOKEN` 30/minute | user | open |
+| upload | `UPLOAD` 10/minute + `UPLOAD_DAILY` 100/day | user | open |
+| search | `SEARCH` 60/minute | user | open |
+| ask | `ASK` 10/minute + `ASK_DAILY` 200/day | user | open |
+| reprocess | `REPROCESS` 10/minute | user | open |
+
+`docker-compose.prod.yml` keeps its stricter overrides (docs/security.md). Behind the
+Vercel BFF every request comes from Vercel's egress IPs: with
+`CLIENT_IP_HEADER_SECRET` (API) = `DIP_CLIENT_IP_SECRET` (frontend, server-only) the
+BFF forwards the browser IP in `X-DIP-Client-IP` and the API trusts it only with the
+matching secret. The UI shows 429s as "You've reached the rate limit for this action.
+Please try again in N seconds/minutes/hours." (from `Retry-After`).
+
+### U4. Frontend: rename, brand, theme, UX
+
+- **Rename**: "Document Intelligence & Analysis" in titles, metadata/OG/Twitter,
+  manifest, header/sidebar wordmark, hero, auth, footer, modal, toasts, FastAPI
+  `app_name`, compose `APP_NAME` default, README/docs headings, this report. Slugs,
+  packages, Docker services, DB names and env keys unchanged. `grep -r "Document
+  Intelligence Platform"` over code/docs: only historical mentions in this report.
+- **Brand** (`4b11059`): `frontend/public/brand/` derived by
+  `frontend/scripts/derive_brand_assets.py` (border-connected white removed, page inside
+  the "D" protected, edge pixels un-premultiplied; corner alpha 0, no halo on dark;
+  all derived files < 100 KB), favicon 16/32/48, apple-touch, 192/512 icons, 1200x630
+  OG image. Mark via `next/image` with alt "Document Intelligence & Analysis". Tokens
+  `#1E6BF0` -> `#7C3AED`.
+- **Theme**: dark by default; `ThemeToggle` in the public header (landing, auth, legal
+  pages) and the app sidebar/mobile header; choice in `localStorage["dia-theme"]`,
+  applied by an inline head script before first paint; `suppressHydrationWarning` on
+  `<html>`/`<body>`, `color-scheme` and `<meta name="darkreader-lock">`. Contrast
+  (WCAG, computed from the tokens): body text 17.6:1 light / 16.0:1 dark, muted 7.7 /
+  8.3, subtle 4.9-5.1 / 5.5-6.0, links 6.0 / 8.6, white on primary 4.75, on violet
+  5.7; a dark `blue-700` that was 2.6:1 was remapped.
+- **Shell**: sidebar (desktop), mobile header with hamburger + bottom navigation,
+  reduced-motion aware transitions, toasts, skeletons, empty states.
+- **Pages**: landing (hero, how it works, features, tech stack, CTA, footer with
+  GitHub placeholder and privacy note); Impressum and Privacy templates (Austria/EU,
+  GDPR) with highlighted placeholders and no invented addresses (the only real address
+  is the Austrian Data Protection Authority's); no analytics, no tracking cookies;
+  dashboard with counts, storage, quick actions and recent activity (audit log);
+  upload dropzone with Uploading -> Processing -> Ready stepper, toast and "Ask
+  questions about this document"; chat-style Ask (document picker, sessionStorage
+  history, starter questions, typing indicator, safe Markdown subset rendered as React
+  elements, `[n]` chips that highlight/expand the source card, copy, partial and
+  insufficient-reason notices, disclaimer); search with highlighted terms.
+
+### U5. Verification (this round)
+
+| Check | Result | Label |
+| --- | --- | --- |
+| `ruff check .` / `ruff format --check .` | clean / 200 files formatted | VERIFIED LOCALLY |
+| `mypy` (strict) | no issues in 166 source files | VERIFIED LOCALLY |
+| `pytest --cov=app` (PostgreSQL + pgvector, Redis) | **491 passed, 11 skipped, 96% (4068 statements, 178 missed), 87.7 s**; skips = S3 live-server tests (no S3 server in this run) | VERIFIED LOCALLY |
+| Alembic on a scratch DB: upgrade head, downgrade -1, upgrade, downgrade base, upgrade, check | `0003 (head)`, "No new upgrade operations detected." | VERIFIED LOCALLY |
+| Frontend `npm run lint` / `typecheck` / `build` | clean / clean / build OK (24 routes) | VERIFIED LOCALLY |
+| Playwright on the prod-like stack (`scripts/e2e_prod_local.sh`: prod compose, Caddy HTTPS with local CA, `next start`, structured stub LLM) | **21 passed** (demo flow 6, full flow 10, theme 5): demo -> upload PDF -> 3 cited answers -> 4th opens the modal -> conversion keeps the document; default dark + toggle persists across reload; name/title/logo-alt assertions; no console errors on public pages in both themes at 1366px and 375px; no horizontal overflow at 375px | VERIFIED LOCALLY |
+| `scripts/check_ask_real.py` against the stub stack | RESULT PASS (3/3) | VERIFIED LOCALLY (stub only) |
+| Secret scan (file:pattern only): tracked files / history (69 commits) / `frontend/.next` (762 files) | 12 / 10 / 28 hits: `replace-with-...` placeholders, CI/test values, fake `sk-test` keys, the pattern list in this report, and `.nft.json` paths containing `...task-async-storage...`; no secret names in `.next/static` | VERIFIED LOCALLY |
+| Real OpenAI `/ask` | not run; the key was never read or used | **NOT VERIFIED** |
+| Dark Reader extension in a real browser | not installed here; the mitigations are in place and no hydration errors were logged by Chromium | **NOT VERIFIED** |
+| Windows (case-only renames avoided; no files renamed by case) | not run on Windows | NOT VERIFIED |
+| Vercel / Oracle / GitHub Actions with these changes | no accounts | NOT VERIFIED |
+
+Bugs found while verifying: the e2e script left `next start`'s child `next-server` on
+port 3000 (next run served stale assets); it now starts it in its own process group,
+kills the group on exit and refuses to start when 3000 is busy. "Create account"
+showed on 375px (class conflict) and "Sign in" wrapped; the sticky Ask composer was
+see-through on mobile.
+
+Screenshots (Playwright, local stub LLM): `docs/screenshots/` and `/workspace/ux-screens/`
+(32 files): `landing|login|impressum-{desktop,mobile}-{dark,light}`,
+`ask-citations-{dark,light}`, `ask-mobile-{dark,light}`, `dashboard-desktop-{dark,light}`,
+`dashboard-mobile-{dark,light}`, `demo-limit-modal-{dark,light}`,
+`demo-upload-ready-dark`, plus the full-flow set.
+
+### U6. New and changed environment keys
+
+Backend (`.env.example`, compose): `ASK_TOP_K` (8), `ASK_CONTEXT_MIN_SIMILARITY` (0.40),
+`ASK_SCOPED_MIN_SIMILARITY` (0.20), `LLM_STRUCTURED_OUTPUT` (true),
+`RATE_LIMIT_REGISTER_DAILY` (20/day), `RATE_LIMIT_UPLOAD_DAILY` (100/day),
+`RATE_LIMIT_UPLOAD_TOKEN` (30/minute), `RATE_LIMIT_ASK_DAILY` (200/day),
+`RATE_LIMIT_DEMO` (3/day), `RATE_LIMIT_DEMO_GLOBAL` (200/day), `CLIENT_IP_HEADER_SECRET`
+(unset; >= 24 chars), `DEMO_ENABLED` (true), `DEMO_MAX_QUESTIONS` (3),
+`DEMO_MAX_UPLOADS` (1), `DEMO_MAX_UPLOAD_BYTES` (5242880), `DEMO_ALLOWED_EXTENSIONS`
+(pdf), `DEMO_TTL_HOURS` (24), `DEMO_CLEANUP_INTERVAL_SECONDS` (900).
+Changed defaults: `LLM_MAX_OUTPUT_TOKENS` 700 -> 900, `MAX_CONTEXT_TOKENS` 3000 -> 4000,
+`RATE_LIMIT_UPLOAD` 30/minute -> 10/minute, `RATE_LIMIT_ASK` 20/minute -> 10/minute,
+`APP_NAME` "Document Intelligence & Analysis".
+Frontend (`frontend/.env.example`): `NEXT_PUBLIC_SITE_URL` (optional), `DIP_CLIENT_IP_SECRET`
+(server-only, same value as `CLIENT_IP_HEADER_SECRET`).
+Your local `.env`: `scripts/generate_env.py --merge` adds missing keys but does not
+change existing values; edit `APP_NAME`, `LLM_MAX_OUTPUT_TOKENS`, `MAX_CONTEXT_TOKENS`,
+`RATE_LIMIT_ASK`, `RATE_LIMIT_UPLOAD` by hand if you want the new defaults.
+
+### U7. Repository state
+
+`main` `2643292` and `dip2` `7eba5a1` unchanged; no remote added, nothing pushed.
+Commits since `72c04dc`: `a864594` ask fix, `0f8805b` demo backend, `4b11059` brand
+assets, `01fe282` frontend foundation, `36f4788` landing/legal/shell/demo UI,
+`b90ed8a` chat Ask, `5242193` upload/dashboard/search, `92fc8c2` rename defaults,
+`4965d58` e2e, `601d213` format, `f4829a1` mobile/contrast fixes, `4937068` docs,
+`b58b306` scoped gate, and the final docs/screenshots commit. Bundle:
+`/workspace/dip-ux.bundle` (`72c04dc..final`; `.env`, `.env.production`, `.e2e/` are
+untracked and not in it).
+
+---
+
+## P. Production phase
 
 ### P1. What was added
 
