@@ -125,6 +125,30 @@ export function DocumentDetail() {
         </p>
       ) : null}
 
+      {completed && (doc.data.suggested_questions?.length ?? 0) >= 3 ? (
+        <Card className="mb-6 p-5" data-testid="document-suggestions">
+          <h2 className="font-semibold">Questions you could ask</h2>
+          <p className="mt-1 text-xs text-subtle">Generated from this document&apos;s text. Opens Ask AI with the question filled in.</p>
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {doc.data.suggested_questions?.map((q) => (
+              <li key={q}>
+                <Link
+                  href={`/ask?document=${id}&q=${encodeURIComponent(q)}`}
+                  data-testid="document-suggestion"
+                  className="inline-block rounded-full border border-border bg-surface-2 px-3 py-1.5 text-sm text-muted transition-colors hover:border-brand-300 hover:text-fg"
+                >
+                  {q}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+      {isActiveStatus(status.data.status) ? (
+        <p className="mb-4 text-xs text-subtle" data-testid="suggestions-pending">
+          Suggested questions will appear here when processing finishes.
+        </p>
+      ) : null}
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="p-5 lg:col-span-2">
           <h2 className="font-semibold">Details</h2>

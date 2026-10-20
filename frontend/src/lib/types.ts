@@ -35,6 +35,8 @@ export interface DocumentItem {
   status: DocumentStatus;
   created_at: string;
   updated_at: string;
+  /** Generated from the document text after processing; null = use generic suggestions. */
+  suggested_questions?: string[] | null;
 }
 
 export interface Page<T> {

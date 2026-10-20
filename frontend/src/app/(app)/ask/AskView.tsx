@@ -11,18 +11,13 @@ import { useSession } from "@/components/SessionProvider";
 import { useToast } from "@/components/Toast";
 import { Badge, Button, Card } from "@/components/ui";
 import { api } from "@/lib/client/api";
+import { useSuggestions } from "@/lib/client/suggestions";
 import { pageLabel } from "@/lib/format";
 import type { AskResponse, Citation } from "@/lib/types";
 
 const HISTORY_KEY = "dia-ask-history";
 const HISTORY_LIMIT = 20;
 
-const STARTERS = [
-  "Summarize this document in a few bullet points.",
-  "What are the key dates, deadlines or time limits?",
-  "What obligations or requirements does it describe?",
-  "Are there any fees, costs or amounts mentioned?",
-];
 
 const INSUFFICIENT_TEXT: Record<string, string> = {
   below_threshold: "No passage in your documents was relevant enough to this question, so no answer was generated.",
@@ -61,12 +56,13 @@ export function AskView() {
   const params = useSearchParams();
   const { user, setDemoQuestionsRemaining } = useSession();
   const toast = useToast();
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(() => (params.get("q") ?? "").slice(0, 1000));
   const [documentId, setDocumentId] = useState(params.get("document") ?? "");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const { suggestions, loading: suggestionsLoading } = useSuggestions(documentId);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -146,9 +142,26 @@ export function AskView() {
               </svg>
             </div>
             <h2 className="mt-4 font-semibold text-fg">Ask a question about your documents</h2>
-            <p className="mt-1 text-sm text-muted">Pick a document below or ask across all of them. Try one of these:</p>
-            <ul className="mt-5 grid gap-2 text-left sm:grid-cols-2">
-              {STARTERS.map((starter) => (
+            <p className="mt-1 text-sm text-muted">
+              {suggestions.generated
+                ? suggestions.source
+                  ? <>Suggested from <span className="font-medium text-fg">{suggestions.source}</span>:</>
+                  : "Suggested from your recent documents:"
+                : "Pick a document below or ask across all of them. Try one of these:"}
+            </p>
+            {suggestions.pending ? (
+              <p role="status" className="mt-3 text-xs text-subtle" data-testid="suggestions-pending">
+                <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-brand-500 align-middle" aria-hidden="true" />
+                Generating questions from this document while it is processed…
+              </p>
+            ) : null}
+            <ul
+              className={`mt-5 grid gap-2 text-left sm:grid-cols-2 ${suggestionsLoading ? "opacity-60" : ""}`}
+              aria-busy={suggestionsLoading}
+              data-testid="suggestions"
+              data-generated={suggestions.generated ? "true" : "false"}
+            >
+              {suggestions.questions.map((starter) => (
                 <li key={starter}>
                   <button
                     type="button"
