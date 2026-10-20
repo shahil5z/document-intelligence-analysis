@@ -66,3 +66,24 @@ node_modules/
 /frontend/next-env.d.ts
 .vercel/
 *.tsbuildinfo
+
+# Keys, credentials and local databases
+id_rsa*
+id_ed25519*
+*.ppk
+*credentials*.json
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+
+# Model caches and docker volume data
+.cache/
+hf_cache/
+/models_cache/
+/docker-data/
+/volumes/
+
+# Logo dropped at the repo root (brand assets live in frontend/public/brand/)
+/logo.png
+/micro.tmp
