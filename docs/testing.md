@@ -4,10 +4,10 @@
 
 | Directory | Tests | Needs |
 | --- | --- | --- |
-| `tests/unit` | 235 | nothing (no DB, Redis, network or model download); 1 test also uses `TEST_REDIS_URL` |
-| `tests/api` | 104 | PostgreSQL 16 + pgvector via `TEST_DATABASE_URL`; 2 readiness tests also need `TEST_REDIS_URL` |
+| `tests/unit` | 359 | nothing (no DB, Redis, network or model download); 1 test also uses `TEST_REDIS_URL` |
+| `tests/api` | 139 | PostgreSQL 16 + pgvector via `TEST_DATABASE_URL`; 2 readiness tests also need `TEST_REDIS_URL` |
 | `tests/integration` | 25 | PostgreSQL 16 + pgvector |
-| **total** | **364** | |
+| **total** | **523** | |
 
 Fakes (all in `tests/`): `HashingEmbeddingProvider` (deterministic 384-d embeddings),
 `MockLLM`, `ReverseReranker`, `RecordingDispatcher` (replaces Celery). The rate limiter
@@ -60,6 +60,7 @@ Manual checklist for Windows: [manual-testing.md](manual-testing.md).
 | --- | --- | --- |
 | `final` before the final-phase changes | Linux box, Python 3.12.15, PostgreSQL 16.15 + pgvector 0.8.7 | 333 passed, 0 skipped, 95% coverage |
 | **`final` after the final-phase changes** | same, plus Redis 7.4.11 with password (`TEST_REDIS_URL`) | **364 passed, 0 skipped, 96% coverage** (3370 statements, 148 missed), 57.7 s |
+| **`main` after the ONNX merge** (2026-10-20) | Linux box, Python 3.12.15, PostgreSQL 16 + pgvector, Redis 7 with password, no S3 server | **512 passed, 11 skipped (S3), 96% coverage** (4320 statements, 185 missed), 74.5 s |
 | DB-backed tests against pgvector 0.6.2 (fallback path) | PostgreSQL 16 + pgvector 0.6.2 | see [verification report](history/final-project-report.md#7-verification-results) |
 | DIP3, historical | Windows 11, PostgreSQL 16.2 + pgvector 0.6.2 | 330 passed, 3 skipped, 95% coverage (not repeated) |
 

@@ -60,7 +60,7 @@ def main() -> None:  # noqa: PLR0915
 
     from alembic import command  # noqa: PLC0415
     from app.ai.embeddings import embed_in_batches  # noqa: PLC0415
-    from app.ai.factory import create_embedding_provider  # noqa: PLC0415
+    from app.ai.factory import create_embedding_provider, create_token_counter  # noqa: PLC0415
     from app.core.config import get_settings  # noqa: PLC0415
     from app.db.models import Document, User  # noqa: PLC0415
     from app.db.repositories.chunks import ChunkRepository, NewChunk  # noqa: PLC0415
@@ -90,7 +90,7 @@ def main() -> None:  # noqa: PLR0915
         counter = ApproximateTokenCounter()
     else:
         embedder = create_embedding_provider(settings)
-        counter = embedder
+        counter = create_token_counter(settings)
     chunker = RecursiveTokenChunker(
         counter,
         chunk_size=settings.chunk_size,

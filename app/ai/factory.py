@@ -11,7 +11,9 @@ from app.ai.base import EmbeddingProvider, LLMProvider, Reranker
 from app.ai.embeddings import SentenceTransformerEmbeddingProvider
 from app.ai.errors import AIProviderConfigurationError
 from app.ai.llm import OpenAICompatibleLLMProvider
+from app.ai.onnx_embeddings import OnnxEmbeddingProvider, TokenizerCounter
 from app.ai.openai_provider import OpenAIChatProvider, OpenAIEmbeddingProvider
+from app.ai.remote_embeddings import RemoteEmbeddingProvider
 from app.ai.reranker import CrossEncoderReranker
 from app.core.config import Settings
 
@@ -63,18 +65,70 @@ def _cached_embedding_provider(  # noqa: PLR0917  (lru_cache key = settings tupl
     )
 
 
-def create_embedding_provider(settings: Settings) -> SentenceTransformerEmbeddingProvider:
-    """Process-wide provider for EMBEDDING_PROVIDER (model weights load on first use)."""
-    if settings.embedding_provider != "sentence-transformers":
-        raise AIProviderConfigurationError("Unsupported EMBEDDING_PROVIDER")
-    return _cached_embedding_provider(
-        settings.embedding_model,
-        settings.embedding_dimension,
-        settings.embedding_batch_size,
-        settings.embedding_device,
-        settings.embedding_query_instruction,
-        settings.torch_num_threads,
+@lru_cache
+def _cached_onnx_provider(  # noqa: PLR0917  (lru_cache key = settings tuple)
+    model: str,
+    dimension: int,
+    onnx_file: str,
+    batch_size: int,
+    query_instruction: str,
+    num_threads: int = 0,
+) -> OnnxEmbeddingProvider:
+    return OnnxEmbeddingProvider(
+        model,
+        expected_dimension=dimension,
+        onnx_file=onnx_file,
+        batch_size=batch_size,
+        query_instruction=query_instruction,
+        num_threads=num_threads,
     )
+
+
+def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
+    """Process-wide provider for EMBEDDING_PROVIDER (model weights load on first use)."""
+    if settings.embedding_provider == "onnx":
+        return _cached_onnx_provider(
+            settings.embedding_model,
+            settings.embedding_dimension,
+            settings.embedding_onnx_file,
+            settings.embedding_batch_size,
+            settings.embedding_query_instruction,
+            settings.torch_num_threads,
+        )
+    if settings.embedding_provider == "remote":
+        if settings.embedding_remote_url is None or settings.internal_embed_secret is None:
+            raise AIProviderConfigurationError(
+                "EMBEDDING_PROVIDER=remote needs EMBEDDING_REMOTE_URL and INTERNAL_EMBED_SECRET"
+            )
+        # Stateless HTTP client: no model and no cache needed.
+        return RemoteEmbeddingProvider(
+            settings.embedding_remote_url,
+            settings.internal_embed_secret.get_secret_value(),
+            model_name=settings.embedding_model,
+            expected_dimension=settings.embedding_dimension,
+            batch_size=min(settings.embedding_batch_size, settings.internal_embed_max_batch),
+            timeout_seconds=settings.embedding_remote_timeout_seconds,
+        )
+    if settings.embedding_provider == "sentence-transformers":
+        return _cached_embedding_provider(
+            settings.embedding_model,
+            settings.embedding_dimension,
+            settings.embedding_batch_size,
+            settings.embedding_device,
+            settings.embedding_query_instruction,
+            settings.torch_num_threads,
+        )
+    raise AIProviderConfigurationError("Unsupported EMBEDDING_PROVIDER")
+
+
+@lru_cache
+def _cached_token_counter(model: str) -> TokenizerCounter:
+    return TokenizerCounter(model)
+
+
+def create_token_counter(settings: Settings) -> TokenizerCounter:
+    """Chunking token counter: the embedding model's tokenizer only (no model weights)."""
+    return _cached_token_counter(settings.embedding_model)
 
 
 @lru_cache

@@ -35,7 +35,7 @@ x-app-environment: &app-environment
   # Used only by POST /ask (LLM_PROVIDER=openai). Never needed for upload, processing or /search.
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   # DIP2: processing, retrieval and question answering (defaults match app/core/config.py).
-  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-sentence-transformers}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-onnx}
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
   EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
   EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}

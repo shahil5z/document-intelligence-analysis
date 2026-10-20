@@ -11,3 +11,11 @@ class LLMError(RuntimeError):
 
     Messages are generic; they never include the API key, prompts or response bodies.
     """
+
+
+class EmbeddingServiceUnavailableError(OSError):
+    """The remote embedding service (the API's /internal/embed) could not be reached.
+
+    An ``OSError`` on purpose: the worker treats it as transient (the job is retried) and
+    search answers 503, exactly like other connectivity failures.
+    """

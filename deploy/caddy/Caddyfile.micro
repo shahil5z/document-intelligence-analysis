@@ -19,9 +19,9 @@
 
 {$API_DOMAIN} {
 
-	# Prometheus metrics stay reachable inside the compose network (api:8000/metrics)
-	# but are never served to the internet.
-	@internal path /metrics /metrics/*
+	# Prometheus metrics and the worker-only embedding endpoint (/internal/embed) stay
+	# reachable inside the compose network (api:8000) but are never served to the internet.
+	@internal path /metrics /metrics/* /internal /internal/*
 	respond @internal 404
 
 	# Reject oversized bodies at the edge, before they reach the API. The API enforces

@@ -35,8 +35,12 @@ a message that names the variable, never the value.
 | `MAX_UPLOAD_SIZE_BYTES` | `10485760` | 413 above this |
 | `ALLOWED_EXTENSIONS` / `ALLOWED_CONTENT_TYPES` | pdf,docx,txt / matching MIME types | comma separated |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` | `*` rejected |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` / `EMBEDDING_BATCH_SIZE` | `sentence-transformers` / `BAAI/bge-small-en-v1.5` / `384` / `32` | dimension must match the `vector(384)` column |
-| `TORCH_NUM_THREADS` | `2` | PyTorch threads per process; `0` = one per core (much slower when processes share the CPU, see [docs/performance.md](performance.md)) |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` / `EMBEDDING_BATCH_SIZE` | `onnx` / `BAAI/bge-small-en-v1.5` / `384` / `32` | `onnx` = ONNX Runtime, the model's fp32 ONNX export, CLS pooling + L2 norm (no PyTorch); `remote` = delegate to the API's `POST /internal/embed` (worker on small machines: one model copy, in the API); `sentence-transformers` = PyTorch, needs `uv sync --extra torch`. Dimension must match the `vector(384)` column |
+| `EMBEDDING_ONNX_FILE` | `onnx/model.onnx` | ONNX file inside the model repository |
+| `EMBEDDING_REMOTE_URL` / `EMBEDDING_REMOTE_TIMEOUT_SECONDS` | unset / `60` | `remote` only, e.g. `http://api:8000/internal/embed`; connection failures are transient (job retried, search 503) |
+| `INTERNAL_EMBED_SECRET` | unset | >= 32 chars; enables `POST /internal/embed` (404 when unset), sent by the worker as `X-Internal-Secret`, compared in constant time; required with `EMBEDDING_PROVIDER=remote`. Not in the OpenAPI docs; Caddy answers 404 for `/internal/*` |
+| `INTERNAL_EMBED_MAX_BATCH` / `INTERNAL_EMBED_MAX_TEXT_CHARS` | `64` / `8000` | per-request caps (the body is also capped by `MAX_REQUEST_BODY_BYTES`) |
+| `TORCH_NUM_THREADS` | `2` | inference threads per process (ONNX Runtime intra-op or PyTorch); `0` = one per core (much slower when processes share the CPU, see [docs/performance.md](performance.md)) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` / `MAX_CHUNKS_PER_DOCUMENT` | `400` / `60` / `1000` | tokens of the embedding tokenizer |
 | `HF_HUB_OFFLINE` | `0` | `1` = use only the cached model |
 | `TOP_K` / `MAX_TOP_K` / `CANDIDATE_K` / `MAX_QUERY_LENGTH` | `5` / `20` / `40` / `1000` | |
@@ -44,7 +48,7 @@ a message that names the variable, never the value.
 | `ASK_TOP_K` / `ASK_CONTEXT_MIN_SIMILARITY` | `8` / `0.40` | passages sent to the LLM once the gate passed, and the floor for including them ([docs/rag.md](rag.md)) |
 | `ASK_SCOPED_MIN_SIMILARITY` | `0.20` | gate for questions scoped to one document or about a whole document ("summarize this document"); the LLM decides |
 | `LLM_STRUCTURED_OUTPUT` | `true` | JSON-schema structured output; one automatic retry without it if the endpoint rejects the schema |
-| `RERANKING_ENABLED` / `RERANKER_MODEL` / `RERANK_TOP_K` | `false` / `cross-encoder/ms-marco-MiniLM-L-6-v2` / `20` | optional cross-encoder |
+| `RERANKING_ENABLED` / `RERANKER_MODEL` / `RERANK_TOP_K` | `false` / `cross-encoder/ms-marco-MiniLM-L-6-v2` / `20` | optional cross-encoder; needs `uv sync --extra torch` |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `openai` / `gpt-4o-mini` / `https://api.openai.com/v1` | any OpenAI-compatible endpoint; `none` disables `/ask` |
 | `LLM_TIMEOUT_SECONDS` / `LLM_MAX_OUTPUT_TOKENS` / `LLM_TEMPERATURE` / `MAX_CONTEXT_TOKENS` | `30` / `900` / `0` / `4000` | |
 | `API_DOCS_ENABLED` | empty (on; off in production) | `/docs`, `/redoc`, `/openapi.json` |

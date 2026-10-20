@@ -4,7 +4,7 @@ import math
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -12,6 +12,7 @@ import pytest
 from app.ai.embeddings import SentenceTransformerEmbeddingProvider, embed_in_batches
 from app.ai.errors import AIProviderConfigurationError, EmbeddingError
 from app.ai.factory import create_embedding_provider
+from app.ai.onnx_embeddings import OnnxEmbeddingProvider
 from app.core.config import load_settings
 from tests.fakes import HashingEmbeddingProvider
 
@@ -95,7 +96,7 @@ def _provider_with(model: _FakeSentenceTransformer) -> SentenceTransformerEmbedd
     provider = SentenceTransformerEmbeddingProvider(
         "fake-model", expected_dimension=384, batch_size=8, query_instruction="query: "
     )
-    provider._model = model  # type: ignore[assignment]  # noqa: SLF001
+    provider._model = model  # type: ignore[assignment,unused-ignore]  # noqa: SLF001
     return provider
 
 
@@ -109,13 +110,20 @@ def test_sentence_transformer_provider_uses_query_instruction() -> None:
     assert provider.count_tokens("three word text") == 3
 
 
-def test_dimension_mismatch_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sentence_transformers  # noqa: PLC0415
+def _fake_module(monkeypatch: pytest.MonkeyPatch, name: str, **attributes: Any) -> ModuleType:
+    """Stand-in for an optional package (torch extra) so these tests run without it."""
+    module = ModuleType(name)
+    for key, value in attributes.items():
+        setattr(module, key, value)
+    monkeypatch.setitem(sys.modules, name, module)
+    return module
 
-    monkeypatch.setattr(
-        sentence_transformers,
-        "SentenceTransformer",
-        lambda *_args, **_kwargs: _FakeSentenceTransformer(768),
+
+def test_dimension_mismatch_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_module(
+        monkeypatch,
+        "sentence_transformers",
+        SentenceTransformer=lambda *_args, **_kwargs: _FakeSentenceTransformer(768),
     )
     provider = SentenceTransformerEmbeddingProvider("fake", expected_dimension=384)
     with pytest.raises(AIProviderConfigurationError, match="768-dimensional"):
@@ -125,18 +133,18 @@ def test_dimension_mismatch_is_a_configuration_error(monkeypatch: pytest.MonkeyP
 def test_torch_threads_are_applied_before_the_model_loads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import sentence_transformers  # noqa: PLC0415
-    import torch  # noqa: PLC0415
+    sentence_transformers = _fake_module(monkeypatch, "sentence_transformers")
+    torch = _fake_module(monkeypatch, "torch")
 
     calls: list[int] = []
-    monkeypatch.setattr(torch, "get_num_threads", lambda: 8)
-    monkeypatch.setattr(torch, "set_num_threads", calls.append)
+    monkeypatch.setattr(torch, "get_num_threads", lambda: 8, raising=False)
+    monkeypatch.setattr(torch, "set_num_threads", calls.append, raising=False)
 
     def fake_model(*_args: Any, **_kwargs: Any) -> _FakeSentenceTransformer:
         assert calls == [2], "threads must be capped before the model is built"
         return _FakeSentenceTransformer(384)
 
-    monkeypatch.setattr(sentence_transformers, "SentenceTransformer", fake_model)
+    monkeypatch.setattr(sentence_transformers, "SentenceTransformer", fake_model, raising=False)
     provider = SentenceTransformerEmbeddingProvider("fake", expected_dimension=384, num_threads=2)
     provider.embed(["text"])
     assert calls == [2]
@@ -158,13 +166,15 @@ def test_factory_returns_cached_lazy_provider() -> None:
     assert first is create_embedding_provider(settings)
     assert first.model_name == "BAAI/bge-small-en-v1.5"
     assert first.dimension == 384
-    assert first._model is None  # noqa: SLF001  (nothing loaded until first use)
+    assert isinstance(first, OnnxEmbeddingProvider)
+    assert first.loaded is False  # nothing loaded until first use
 
 
 def test_app_and_worker_start_without_importing_torch() -> None:
     code = (
         "import sys, app.main, app.workers.tasks; "
-        "print(any(m in sys.modules for m in ('torch', 'sentence_transformers', 'pypdf')))"
+        "print(any(m in sys.modules for m in "
+        "('torch', 'sentence_transformers', 'pypdf', 'onnxruntime', 'tokenizers')))"
     )
     result = subprocess.run(  # noqa: S603  (fixed interpreter and arguments)
         [sys.executable, "-c", code],

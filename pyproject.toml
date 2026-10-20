@@ -11,7 +11,9 @@ dependencies = [
     "fastapi>=0.143.3",
     "gunicorn>=26.2.0",
     "httpx2>=2.13.1",
+    "huggingface-hub>=1.33.0",
     "numpy>=2.5.4",
+    "onnxruntime>=1.31.0",
     "openai>=3.35.1",
     "pgvector>=0.5.1",
     "prometheus-client>=0.21",
@@ -24,17 +26,24 @@ dependencies = [
     "python-docx>=1.2.0",
     "python-multipart>=0.0.32",
     "redis>=8.1.0",
-    "sentence-transformers>=6.1.0",
     "sqlalchemy>=2.0",
-    "torch>=2.14.1",
+    "tokenizers>=0.23.3",
     "uvicorn-worker>=0.4.0",
     "uvicorn[standard]>=0.54.0",
+]
+
+[project.optional-dependencies]
+# PyTorch backend: EMBEDDING_PROVIDER=sentence-transformers, RERANKING_ENABLED=true and the
+# calibration scripts. Not installed in the image (uv sync --extra torch to add it).
+torch = [
+    "sentence-transformers>=6.1.0",
+    "torch>=2.14.1",
 ]
 
 [tool.uv]
 package = false
 
-# CPU-only PyTorch wheels (sentence-transformers dependency). The default PyPI wheels for
+# CPU-only PyTorch wheels (optional "torch" extra). The default PyPI wheels for
 # Linux bundle CUDA libraries (several GB) that this CPU-only service never uses.
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -94,6 +103,11 @@ warn_unreachable = true
 
 [[tool.mypy.overrides]]
 module = ["celery.*", "kombu.*"]
+ignore_missing_imports = true
+
+# Optional "torch" extra (absent from the default install) and onnxruntime (no stubs).
+[[tool.mypy.overrides]]
+module = ["sentence_transformers", "sentence_transformers.*", "torch", "torch.*", "onnxruntime", "onnxruntime.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]

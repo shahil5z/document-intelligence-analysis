@@ -66,7 +66,7 @@ More detail: [docs/architecture.md](docs/architecture.md) and the decision recor
 ## Tech stack
 
 - Backend: Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (sync, psycopg 3), Alembic,
-  PyJWT, pwdlib (Argon2id), pypdf, python-docx, sentence-transformers (CPU torch),
+  PyJWT, pwdlib (Argon2id), pypdf, python-docx, ONNX Runtime + tokenizers (CPU, no PyTorch),
   boto3, gunicorn + uvicorn workers, uv.
 - Data: PostgreSQL 16 with pgvector (HNSW) and full-text search, Redis 7.
 - Jobs: Celery 5 (worker + beat).
@@ -85,8 +85,12 @@ More detail: [docs/architecture.md](docs/architecture.md) and the decision recor
    plain decoding for TXT. Scanned PDFs without a text layer fail with a clear message.
 4. **Cleaning and chunking**: whitespace/Unicode normalisation, then token-aware chunks
    (default 400 tokens with 60 overlap, capped per document).
-5. **Embeddings**: `BAAI/bge-small-en-v1.5` (384 dimensions) through
-   sentence-transformers on CPU, in the worker (documents) and the API (queries).
+5. **Embeddings**: `BAAI/bge-small-en-v1.5` (384 dimensions), its fp32 ONNX export run
+   with ONNX Runtime on CPU (CLS pooling, L2 normalisation; no PyTorch in the image).
+   On the 1 GB VM a single model copy lives in the API: the API embeds queries, and the
+   worker sends document chunks to the API's internal `POST /internal/embed`
+   (shared-secret header, blocked at Caddy). Chunking counts tokens with the model's
+   tokenizer only.
 6. **Indexing**: chunks are stored in `document_chunks` with a `vector(384)` column
    (HNSW cosine index) and a generated `tsvector` column (GIN index).
 7. **Retrieval**: semantic, keyword or hybrid search over the user's completed
@@ -167,6 +171,7 @@ only; real `.env` files are git-ignored.
 Celery beat, a one-shot migration job, and PostgreSQL + Redis on an internal network.
 The frontend is meant for Vercel. `docker-compose.micro.yml` is an override for a
 1 GB VM (smaller memory limits, one API worker, beat inside the worker,
+one embedding model copy in the API with the worker on `EMBEDDING_PROVIDER=remote`,
 `deploy/caddy/Caddyfile.micro`). Guides:
 [docs/production-deployment.md](docs/production-deployment.md),
 [docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md),
@@ -176,9 +181,10 @@ The frontend is meant for Vercel. `docker-compose.micro.yml` is an override for 
 
 ## Known limitations
 
-- On a 1 GB VM the embedding model and PyTorch do not fit comfortably; document
-  processing failed there with memory errors and timeouts. A larger VM (the docs
-  target 2 OCPU / 12 GB) or a lighter embedding runtime is needed.
+- On a 1 GB VM memory is tight (about 300 MB available at idle, swap in use): the
+  first embedding after a restart loads the model (about 12 s) and the first searches
+  after idle can take seconds while pages are swapped back in. Embedding runs inside
+  the single API process, so document embedding and requests share one CPU.
 - `/metrics` has no authentication; it is only protected by not being exposed (Caddy
   returns 404 for it and it is reachable only inside the compose network).
 - No refresh tokens, token revocation or account lockout.
