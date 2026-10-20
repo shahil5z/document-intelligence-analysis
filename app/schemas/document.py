@@ -19,6 +19,11 @@ class DocumentRead(BaseModel):
     status: DocumentStatus
     created_at: datetime
     updated_at: datetime
+    suggested_questions: list[str] | None = Field(
+        default=None,
+        description="Questions generated from the document text after processing; null "
+        "when none were generated (clients fall back to generic suggestions).",
+    )
 
 
 class DocumentUploadResponse(BaseModel):
@@ -37,7 +42,7 @@ class ProcessingJobRead(BaseModel):
     stage: str | None = Field(
         default=None,
         description="Last pipeline step started: integrity_check, extract, normalize, chunk, "
-        "embed or index.",
+        "embed, index or suggest.",
     )
     error_message: str | None = Field(
         default=None, description="Safe, user-facing failure reason (no internal details)."

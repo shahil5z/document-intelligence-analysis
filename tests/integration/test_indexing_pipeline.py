@@ -78,11 +78,11 @@ def test_pdf_is_extracted_chunked_embedded_and_indexed(
         assert chunk.char_end > chunk.char_start
     job = _job(db_session, document_id)
     assert job.status is JobStatus.COMPLETED
-    assert job.stage == "index"
+    assert job.stage == "suggest"
 
     status = client.get(f"/documents/{document_id}/status", headers=user_headers).json()
     assert status["chunk_count"] == len(chunks)
-    assert status["job"]["stage"] == "index"
+    assert status["job"]["stage"] == "suggest"
 
 
 def test_docx_and_txt_are_indexed(

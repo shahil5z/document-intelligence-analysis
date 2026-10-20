@@ -1,4 +1,4 @@
-"""DIP2 pipeline steps: extract -> normalize -> chunk -> embed -> index.
+"""DIP2 pipeline steps: extract -> normalize -> chunk -> embed -> index -> suggest.
 
 Each step reads and writes ``context.state``. Expected, non-retryable problems raise
 ``PermanentProcessingError`` with a user-safe message (no parser or model details).
@@ -10,12 +10,13 @@ and reprocessing idempotent.
 import logging
 import time
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.ai.base import EmbeddingProvider
+from app.ai.base import EmbeddingProvider, LLMProvider
 from app.ai.embeddings import embed_in_batches
 from app.ai.errors import AIProviderConfigurationError
+from app.ai.suggestions import generate_suggested_questions
 from app.core.config import Settings
 from app.db.models import Document
 from app.db.repositories.chunks import ChunkRepository, NewChunk
@@ -181,12 +182,55 @@ class IndexStep:
         logger.info("pipeline.indexed", extra={"chunk_count": len(chunks)})
 
 
+class SuggestQuestionsStep:
+    """Best effort: generate suggested questions after indexing.
+
+    Never raises. Any failure (no LLM, timeout, bad reply, database hiccup) is logged and
+    leaves ``documents.suggested_questions`` null; the job still completes.
+    """
+
+    name = "suggest"
+
+    def __init__(
+        self, session_factory: sessionmaker[Session], llm: LLMProvider | None, max_chars: int
+    ) -> None:
+        self._session_factory = session_factory
+        self._llm = llm
+        self._max_chars = max_chars
+
+    def run(self, context: PipelineContext) -> None:
+        if self._llm is None or context.state.content is None:
+            return
+        started = time.perf_counter()
+        try:
+            text, _ = context.state.content.joined()
+            questions = generate_suggested_questions(self._llm, text, max_chars=self._max_chars)
+            with session_scope(self._session_factory) as session:
+                session.execute(
+                    update(Document)
+                    .where(Document.id == context.document_id)
+                    .values(suggested_questions=questions)
+                )
+                session.commit()
+        except Exception as exc:  # must never fail the job
+            logger.warning("pipeline.suggestions_failed", extra={"error_type": type(exc).__name__})
+            return
+        logger.info(
+            "pipeline.suggestions",
+            extra={
+                "question_count": len(questions or []),
+                "duration_ms": round((time.perf_counter() - started) * 1000),
+            },
+        )
+
+
 def build_indexing_pipeline(
     *,
     settings: Settings,
     session_factory: sessionmaker[Session],
     embedder: EmbeddingProvider,
     token_counter: TokenCounter,
+    suggestion_llm: LLMProvider | None = None,
 ) -> DocumentPipeline:
     chunker = RecursiveTokenChunker(
         token_counter,
@@ -202,5 +246,8 @@ def build_indexing_pipeline(
             ChunkStep(chunker, settings.max_chunks_per_document),
             EmbedStep(embedder, settings.embedding_batch_size),
             IndexStep(session_factory, embedder.model_name),
+            SuggestQuestionsStep(
+                session_factory, suggestion_llm, settings.question_suggestions_max_input_chars
+            ),
         ]
     )

@@ -2,7 +2,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, ForeignKey, Index, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -39,6 +39,9 @@ class Document(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 3-5 questions generated from the document text after indexing; null when not
+    # generated (no LLM configured, generation failed, or processed before 0004).
+    suggested_questions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
 
     owner: Mapped["User"] = relationship(back_populates="documents")
     jobs: Mapped[list["DocumentProcessingJob"]] = relationship(

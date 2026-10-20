@@ -34,6 +34,7 @@ os.environ["JWT_SECRET_KEY"] = secrets.token_urlsafe(48)
 os.environ["MAX_UPLOAD_SIZE_BYTES"] = str(64 * 1024)
 os.environ["UPLOAD_CHUNK_SIZE_BYTES"] = "4096"
 os.environ["LOG_LEVEL"] = "WARNING"
+os.environ["QUESTION_SUGGESTIONS_ENABLED"] = "false"
 # Rate limiting is exercised by dedicated tests with their own app/settings; the rest
 # of the suite must not depend on request counts. Memory backend: no Redis needed.
 os.environ["RATE_LIMIT_ENABLED"] = "false"
@@ -45,6 +46,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from alembic import command  # noqa: E402
+from app.ai.base import LLMProvider  # noqa: E402
 from app.api.dependencies.services import (  # noqa: E402
     get_embedder,
     get_llm,
@@ -169,6 +171,7 @@ def run_indexing(
     storage: StorageService,
     embedder: HashingEmbeddingProvider,
     settings: Settings | None = None,
+    suggestion_llm: LLMProvider | None = None,
 ) -> JobOutcome:
     """Run the real DIP2 pipeline for one job, with the fake embedder and approx tokens."""
     processor = DocumentProcessor(
@@ -179,6 +182,7 @@ def run_indexing(
             session_factory=get_session_factory(),
             embedder=embedder,
             token_counter=ApproximateTokenCounter(),
+            suggestion_llm=suggestion_llm,
         ),
     )
     return processor.run(job_id=job_id, is_final_attempt=False)

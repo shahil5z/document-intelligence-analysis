@@ -186,3 +186,29 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
         temperature=settings.llm_temperature,
         structured_output=settings.llm_structured_output,
     )
+
+
+def create_suggestion_llm(settings: Settings) -> LLMProvider | None:
+    """Small LLM client for suggested questions, or ``None`` when generation is skipped.
+
+    Skipped when turned off, when no LLM/key is configured, or for the local stub LLM
+    (e2e stacks), so tests and offline setups never make this call.
+    """
+    if not settings.question_suggestions_enabled or settings.llm_provider == "none":
+        return None
+    if "stub" in settings.llm_model.lower() or "stub" in settings.llm_base_url.lower():
+        return None
+    key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else ""
+    if not key.strip() or key.lower().startswith(_PLACEHOLDER_PREFIX):
+        return None
+    return _cached_llm_provider(
+        api_key=key,
+        model=settings.llm_model,
+        base_url=settings.llm_base_url,
+        timeout_seconds=min(
+            settings.question_suggestions_timeout_seconds, settings.llm_timeout_seconds
+        ),
+        max_output_tokens=settings.question_suggestions_max_output_tokens,
+        temperature=0.3,
+        structured_output=settings.llm_structured_output,
+    )

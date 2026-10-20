@@ -9,7 +9,11 @@ from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.exc import OperationalError
 
-from app.ai.factory import create_embedding_provider, create_token_counter
+from app.ai.factory import (
+    create_embedding_provider,
+    create_suggestion_llm,
+    create_token_counter,
+)
 from app.core.config import get_settings
 from app.core.request_context import RequestContext, bind_context, reset_context
 from app.db.session import get_session_factory
@@ -75,6 +79,8 @@ def process_document(
                 embedder=embedder,
                 # Tokenizer only: chunking never needs the model weights.
                 token_counter=create_token_counter(settings),
+                # One small HTTP call to the LLM; None when not configured.
+                suggestion_llm=create_suggestion_llm(settings),
             ),
             max_attempts=max_claim_attempts(settings.celery_task_max_retries),
             timeout_errors=(SoftTimeLimitExceeded,),

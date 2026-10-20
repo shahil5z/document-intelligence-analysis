@@ -199,6 +199,13 @@ class Settings(BaseSettings):
     # Request OpenAI structured outputs (response_format json_schema, app/prompt/
     # response_schema.json). Endpoints that reject it are retried once without it.
     llm_structured_output: bool = True
+    # Suggested questions: one small LLM call per processed document (worker), fed the
+    # start of the document text. Failures never fail the job; the field stays null.
+    # Skipped automatically when no LLM is configured or the model/base URL is a stub.
+    question_suggestions_enabled: bool = True
+    question_suggestions_max_input_chars: int = Field(default=10_000, ge=500, le=50_000)
+    question_suggestions_max_output_tokens: int = Field(default=200, ge=50, le=1000)
+    question_suggestions_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
 
     # --- DIP3: hardening, rate limiting, observability ----------------------------------
     # Swagger UI / ReDoc / openapi.json. None = enabled except when APP_ENV=production.
