@@ -9,7 +9,7 @@ import { DocumentFilter } from "@/components/DocumentFilter";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { useSession } from "@/components/SessionProvider";
 import { useToast } from "@/components/Toast";
-import { Badge, Button, Card } from "@/components/ui";
+import { Badge, Button, Card, Skeleton } from "@/components/ui";
 import { api } from "@/lib/client/api";
 import { useSuggestions } from "@/lib/client/suggestions";
 import { pageLabel } from "@/lib/format";
@@ -156,12 +156,18 @@ export function AskView() {
               </p>
             ) : null}
             <ul
-              className={`mt-5 grid gap-2 text-left sm:grid-cols-2 ${suggestionsLoading ? "opacity-60" : ""}`}
+              className="mt-5 grid gap-2 text-left sm:grid-cols-2"
               aria-busy={suggestionsLoading}
               data-testid="suggestions"
               data-generated={suggestions.generated ? "true" : "false"}
             >
-              {suggestions.questions.map((starter) => (
+              {suggestionsLoading
+                ? [0, 1, 2, 3].map((n) => (
+                    <li key={n}>
+                      <Skeleton className="h-10 w-full rounded-lg" />
+                    </li>
+                  ))
+                : suggestions.questions.map((starter) => (
                 <li key={starter}>
                   <button
                     type="button"
