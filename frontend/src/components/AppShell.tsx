@@ -141,7 +141,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="space-y-3 border-t border-border p-4">
           <UserBlock />
           <div className="flex items-center justify-between text-xs text-subtle">
-            <Link href="/architecture" className="hover:text-fg">How it works</Link>
+            <Link href="/#how-it-works" className="hover:text-fg">How it works</Link>
             <ThemeToggle />
           </div>
         </div>

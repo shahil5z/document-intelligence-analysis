@@ -216,12 +216,12 @@ export function Uploader() {
     <>
       <PageHeader
         title="Upload documents"
-        description="Files are processed in the background: text extraction, chunking and embedding."
+        description="Add lecture notes, papers, syllabi or assignment briefs. Files are usually ready in under a minute."
       />
       {demo ? (
         <p className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900" data-testid="demo-upload-hint">
           Demo: {demoUploadsLeft} of {demo.uploads_limit} upload{demo.uploads_limit === 1 ? "" : "s"} left · PDF only · up to{" "}
-          {formatBytes(demo.max_upload_bytes)}. Not sure what to try? Any short PDF such as a policy or a manual works well.
+          {formatBytes(demo.max_upload_bytes)}. Short lecture notes or a paper work well.
         </p>
       ) : null}
       {policy.error ? <ErrorAlert error={policy.error} onRetry={policy.reload} /> : null}
@@ -269,7 +269,7 @@ export function Uploader() {
             />
           </div>
           <p className="mt-3 text-xs text-subtle">
-            Demo service: please don&apos;t upload confidential or personal documents.
+            Please don&apos;t upload private or confidential files.
           </p>
         </Card>
       ) : null}

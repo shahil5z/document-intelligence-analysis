@@ -13,8 +13,8 @@ import { pageLabel } from "@/lib/format";
 import type { SearchMode, SearchResponse, SearchResult } from "@/lib/types";
 
 const MODES: { value: SearchMode; label: string; hint: string }[] = [
-  { value: "hybrid", label: "Hybrid", hint: "Meaning and exact words (recommended)" },
-  { value: "semantic", label: "Semantic", hint: "Similar meaning, different wording" },
+  { value: "hybrid", label: "Hybrid", hint: "Best for most searches" },
+  { value: "semantic", label: "Semantic", hint: "Finds the idea, even in other words" },
   { value: "keyword", label: "Keyword", hint: "Exact terms (full-text)" },
 ];
 
@@ -56,7 +56,7 @@ export function SearchView() {
 
   return (
     <>
-      <PageHeader title="Search" description="Find passages across your completed documents." />
+      <PageHeader title="Search" description="Find a topic or term across your files." />
       <Card className="p-4 sm:p-6">
         <form onSubmit={onSubmit} className="space-y-4">
           <Field id="query" label="Search query">
@@ -124,7 +124,7 @@ export function SearchView() {
           <Card>
             <EmptyState
               title="No matching passages"
-              description="Try different words, switch to semantic mode, or check that your documents have finished processing."
+              description="Try other words or the Semantic mode. Files still processing can't be searched yet."
             />
           </Card>
         ) : null}

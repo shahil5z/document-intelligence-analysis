@@ -61,14 +61,15 @@ test("public pages render", async ({ browser }) => {
   await page.goto("/");
   await expect(page).toHaveTitle("Document Intelligence & Analysis");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "Ask your documents. Get answers you can verify.",
+    "Study with your own material. Get answers you can check.",
   );
   await expect(page.getByRole("img", { name: "Document Intelligence & Analysis" }).first()).toBeVisible();
   await expect(page.getByRole("contentinfo")).toContainText(/© \d{4} Document Intelligence & Analysis/);
   await shot(page, "landing");
-  await page.goto("/architecture");
-  await expect(page.getByRole("heading", { name: "Architecture", exact: true })).toBeVisible();
-  await shot(page, "architecture");
+  // Every public link on the landing page resolves (no 404s).
+  const hrefs = await page.$$eval("a[href^='/']", (as) => [...new Set(as.map((a) => a.getAttribute("href")!.split("#")[0] || "/"))]);
+  for (const href of hrefs) expect((await page.request.get(href)).status(), href).toBe(200);
+  expect((await page.request.get("/architecture")).status()).toBe(404);
   // Protected pages redirect to the login page without a session.
   await page.goto("/documents");
   await expect(page).toHaveURL(/\/login\?next=%2Fdocuments/);

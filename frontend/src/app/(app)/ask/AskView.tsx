@@ -124,7 +124,7 @@ export function AskView() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">Ask AI</h1>
-          <p className="mt-1 text-sm text-muted">Answers come only from passages in your documents, with numbered sources.</p>
+          <p className="mt-1 text-sm text-muted">Answers come only from your files, with page sources.</p>
         </div>
         {turns.length > 0 ? (
           <Button variant="ghost" size="sm" onClick={() => setTurns([])} disabled={busy}>
@@ -141,18 +141,18 @@ export function AskView() {
                 <path d="M8 10h8M8 14h5M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-6l-4 3v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <h2 className="mt-4 font-semibold text-fg">Ask a question about your documents</h2>
+            <h2 className="mt-4 font-semibold text-fg">Ask about your files</h2>
             <p className="mt-1 text-sm text-muted">
               {suggestions.generated
                 ? suggestions.source
                   ? <>Suggested from <span className="font-medium text-fg">{suggestions.source}</span>:</>
                   : "Suggested from your recent documents:"
-                : "Pick a document below or ask across all of them. Try one of these:"}
+                : "Pick a file below or ask across all of them."}
             </p>
             {suggestions.pending ? (
               <p role="status" className="mt-3 text-xs text-subtle" data-testid="suggestions-pending">
                 <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-brand-500 align-middle" aria-hidden="true" />
-                Generating questions from this document while it is processed…
+                Preparing question ideas for this file…
               </p>
             ) : null}
             <ul
@@ -203,7 +203,7 @@ export function AskView() {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={outOfQuestions ? "All demo questions used. Create a free account to keep asking." : "Ask about your documents…  (Enter to send, Shift+Enter for a new line)"}
+            placeholder={outOfQuestions ? "All demo questions used. Create a free account to keep asking." : "Ask a question…  (Enter to send)"}
             className="block w-full resize-none bg-transparent px-1 text-[15px] text-fg placeholder:text-subtle focus:outline-none disabled:cursor-not-allowed"
           />
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -221,7 +221,7 @@ export function AskView() {
           </div>
         </div>
         <p className="mt-2 text-center text-xs text-subtle">
-          AI answers can be wrong or incomplete. Check the cited passages before relying on them.
+          AI answers can be wrong. Check the sources.
         </p>
       </form>
     </div>
@@ -236,7 +236,7 @@ function TypingIndicator() {
           <span key={delay} className="h-2 w-2 animate-bounce rounded-full bg-brand-500" style={{ animationDelay: `${delay}ms` }} />
         ))}
       </span>
-      Searching your documents and writing an answer…
+      Reading your files…
     </div>
   );
 }

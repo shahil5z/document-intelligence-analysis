@@ -16,9 +16,6 @@ export function PublicHeader() {
           <Link href="/#how-it-works" className="hidden rounded-lg px-3 py-2 text-muted hover:bg-surface-2 hover:text-fg md:inline-block">
             How it works
           </Link>
-          <Link href="/architecture" className="hidden rounded-lg px-3 py-2 text-muted hover:bg-surface-2 hover:text-fg md:inline-block">
-            Architecture
-          </Link>
           <ThemeToggle />
           <Link href="/login" className="whitespace-nowrap rounded-lg px-2.5 py-2 font-medium text-fg hover:bg-surface-2 sm:px-3">
             Sign in
@@ -42,17 +39,15 @@ export function PublicFooter() {
         <div>
           <Wordmark compact />
           <p className="mt-3 max-w-sm text-muted">
-            A portfolio project. AI answers can be wrong: always check the cited passages.
+            A portfolio project. AI answers can be wrong, so check the sources.
           </p>
           <p className="mt-2 max-w-sm text-xs text-subtle">
-            Privacy: no analytics, no tracking cookies. One strictly necessary session cookie
-            keeps you signed in.
+            No analytics or tracking. One cookie keeps you signed in.
           </p>
         </div>
         <nav aria-label="Product" className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wider text-subtle">Product</p>
-          <Link href="/#features" className="block text-muted hover:text-fg">Features</Link>
-          <Link href="/architecture" className="block text-muted hover:text-fg">Architecture</Link>
+          <Link href="/#how-it-works" className="block text-muted hover:text-fg">How it works</Link>
           <a href={GITHUB_URL} className="block text-muted hover:text-fg" rel="noopener noreferrer">
             GitHub
           </a>

@@ -15,7 +15,7 @@ export function SettingsView() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Your account and recent activity." />
+      <PageHeader title="Settings" description="Your account." />
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="p-5">
           <h2 className="font-semibold">Account</h2>

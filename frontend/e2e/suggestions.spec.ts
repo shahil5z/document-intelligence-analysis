@@ -37,7 +37,7 @@ test("ask panel shows generated questions, a pending state and the static fallba
   // 1. No documents with suggestions: static starters.
   await page.goto("/ask");
   await expect(page.getByTestId("suggestions")).toHaveAttribute("data-generated", "false");
-  await expect(page.getByTestId("starter-question").first()).toHaveText("Summarize this document in a few bullet points.");
+  await expect(page.getByTestId("starter-question").first()).toHaveText("Summarize the key points.");
 
   // 2. "Ask across all": questions from the most recent completed document.
   await page.route("**/api/proxy/documents?*", (route) =>

@@ -73,7 +73,7 @@ export function DocumentsList() {
         ) : items.length === 0 ? (
           <EmptyState
             title="No documents"
-            description="Uploaded files appear here with their processing status."
+            description="Your uploaded files will show up here."
             action={<ButtonLink href="/upload">Upload a document</ButtonLink>}
           />
         ) : (

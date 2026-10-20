@@ -363,7 +363,7 @@ through it by hand on Windows is NOT VERIFIED.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| U1 | Open `/` | landing page with "Get started" / "Sign in"; `/architecture` shows the diagram |
+| U1 | Open `/` | landing page with "Try the demo" / "Create free account"; footer links work |
 | U2 | Open `/dashboard` while signed out | redirected to `/login?next=/dashboard` |
 | U3 | Register with a new e-mail and a password of 12+ characters | redirected to the dashboard; e-mail shown in the header |
 | U4 | DevTools > Application > Cookies | `dip_session` is `HttpOnly`, `SameSite=Lax` (and `Secure` on HTTPS); Local/Session Storage contain no token |

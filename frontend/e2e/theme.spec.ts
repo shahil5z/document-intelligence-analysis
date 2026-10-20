@@ -51,7 +51,6 @@ for (const theme of ["dark", "light"] as const) {
         ["/register", "register"],
         ["/impressum", "impressum"],
         ["/privacy", "privacy"],
-        ["/architecture", "architecture"],
       ] as const) {
         await page.goto(route);
         await expect(page.locator("html")).toHaveClass(theme === "dark" ? /\bdark\b/ : /^(?!.*\bdark\b)/);

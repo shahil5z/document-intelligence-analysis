@@ -44,7 +44,7 @@ export function DemoUpgradeDialog({ open, reason, onClose }: { open: boolean; re
     try {
       await auth.convertDemo(email, password);
       await refresh();
-      toast.show({ tone: "success", title: "Account created", message: "Your documents were kept. Limits are lifted." });
+      toast.show({ tone: "success", title: "Account created", message: "Your files were kept." });
       onClose();
     } catch (err) {
       setError(err);

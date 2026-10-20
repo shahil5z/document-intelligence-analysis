@@ -14,6 +14,20 @@ import { ApiError, processingFailureMessage } from "@/lib/errors";
 import { fileTypeLabel, formatBytes, formatDate } from "@/lib/format";
 import type { DocumentItem, DocumentStatusResponse } from "@/lib/types";
 
+const STAGE_LABELS: Record<string, string> = {
+  integrity_check: "Checking the file",
+  extract: "Reading the text",
+  normalize: "Reading the text",
+  chunk: "Splitting into passages",
+  embed: "Indexing",
+  index: "Indexing",
+  suggest: "Preparing question ideas",
+};
+
+function stageLabel(stage: string | null | undefined): string {
+  return (stage && STAGE_LABELS[stage]) || "Processing";
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function DocumentDetail() {
@@ -121,14 +135,14 @@ export function DocumentDetail() {
       ) : null}
       {isActiveStatus(status.data.status) ? (
         <p role="status" className="mb-4 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
-          Processing{job?.stage ? ` (${job.stage})` : ""}… this page updates automatically.
+          {stageLabel(job?.stage)}… this page updates by itself.
         </p>
       ) : null}
 
       {completed && (doc.data.suggested_questions?.length ?? 0) >= 3 ? (
         <Card className="mb-6 p-5" data-testid="document-suggestions">
           <h2 className="font-semibold">Questions you could ask</h2>
-          <p className="mt-1 text-xs text-subtle">Generated from this document&apos;s text. Opens Ask AI with the question filled in.</p>
+          <p className="mt-1 text-xs text-subtle">Based on this file. Click one to open it in Ask AI.</p>
           <ul className="mt-3 flex flex-wrap gap-2">
             {doc.data.suggested_questions?.map((q) => (
               <li key={q}>
@@ -161,7 +175,7 @@ export function DocumentDetail() {
             <Item term="Processing attempts" value={job ? String(job.attempts) : "-"} />
           </dl>
           <p className="mt-6 text-xs text-slate-500">
-            A text preview is not available; use Search or Ask AI to read passages from this document.
+            To read passages, use Search or Ask AI.
           </p>
         </Card>
 

@@ -58,8 +58,8 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         </h1>
         <p className="mt-1 text-sm text-muted">
           {isRegister
-            ? "Your documents stay private to this account."
-            : "Welcome back. Sign in to your documents."}
+            ? "Keep your notes and papers in one private place."
+            : "Welcome back."}
         </p>
         {notice ? (
           <p role="status" className="mt-4 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-900">
@@ -108,7 +108,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
           or
           <span className="h-px flex-1 bg-border" />
         </div>
-        <DemoButton className="w-full" size="lg" label="Try the demo without an account" />
+        <DemoButton className="w-full" size="lg" label="Try the demo first" />
         <p className="mt-2 text-center text-xs text-subtle">
           1 PDF, 3 questions, deleted after 24 hours.
         </p>

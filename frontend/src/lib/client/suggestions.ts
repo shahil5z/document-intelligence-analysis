@@ -10,10 +10,10 @@ import { useInterval } from "./hooks";
 
 /** Generic starters, used when no document-specific questions exist. */
 export const STATIC_SUGGESTIONS = [
-  "Summarize this document in a few bullet points.",
-  "What are the key dates, deadlines or time limits?",
-  "What obligations or requirements does it describe?",
-  "Are there any fees, costs or amounts mentioned?",
+  "Summarize the key points.",
+  "What are the main definitions?",
+  "What deadlines or requirements are listed?",
+  "What are the main topics covered?",
 ];
 
 const MAX_SUGGESTIONS = 4;

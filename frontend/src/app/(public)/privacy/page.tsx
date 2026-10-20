@@ -33,7 +33,9 @@ export default function PrivacyPage() {
           <strong>Questions</strong> you ask. To answer, the question and the most relevant
           passages of your documents are sent to the language-model provider{" "}
           <Placeholder>OpenAI, L.L.C. / other provider; data processing agreement and
-          transfer basis (e.g. EU-US Data Privacy Framework or SCCs)</Placeholder>.
+          transfer basis (e.g. EU-US Data Privacy Framework or SCCs)</Placeholder>. After
+          each upload, the beginning of the document text is also sent to the same provider
+          once to suggest questions.
         </li>
         <li>
           <strong>Technical logs</strong>: request time, path, status, a request id and
