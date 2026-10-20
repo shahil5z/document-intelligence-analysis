@@ -168,3 +168,6 @@ def test_dip2_defaults() -> None:
     assert (settings.chunk_size, settings.chunk_overlap) == (400, 60)
     assert settings.reranking_enabled is False
     assert settings.llm_provider == "openai"
+    assert settings.embedding_provider == "onnx"
+    assert settings.embedding_onnx_file == "onnx/model.onnx"
+    assert settings.internal_embed_secret is None

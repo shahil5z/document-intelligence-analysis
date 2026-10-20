@@ -6,6 +6,7 @@ is a ``SecretStr`` so it is masked in ``repr`` and logs; validation errors never
 input values.
 """
 
+import importlib.util
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -19,6 +20,7 @@ from sqlalchemy.engine import URL
 from app.core.rate_limit import parse_rate
 
 MIN_JWT_SECRET_LENGTH = 32
+MIN_INTERNAL_SECRET_LENGTH = 32
 _PLACEHOLDER_PREFIXES = ("replace-with", "change-me", "changeme", "<")
 
 
@@ -121,15 +123,29 @@ class Settings(BaseSettings):
     # --- DIP2: document processing, retrieval and question answering ----------------
     # Models are loaded lazily on first use (worker: first document; API: first search),
     # never at startup, in health checks or in the test suite.
-    embedding_provider: Literal["sentence-transformers"] = "sentence-transformers"
+    # onnx: ONNX Runtime with the model's fp32 ONNX export (default, no PyTorch).
+    # remote: delegate to the API's POST /internal/embed (worker on small machines, so
+    # only the API holds the model). sentence-transformers: PyTorch, needs the optional
+    # "torch" extra (uv sync --extra torch).
+    embedding_provider: Literal["onnx", "remote", "sentence-transformers"] = "onnx"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Path of the ONNX file inside the model repository (EMBEDDING_PROVIDER=onnx).
+    embedding_onnx_file: str = "onnx/model.onnx"
+    # EMBEDDING_PROVIDER=remote: the API's internal endpoint, e.g. http://api:8000/internal/embed
+    embedding_remote_url: str | None = None
+    embedding_remote_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    # Shared secret for POST /internal/embed (X-Internal-Secret header). Unset = the
+    # endpoint answers 404. Required whenever EMBEDDING_PROVIDER=remote.
+    internal_embed_secret: SecretStr | None = None
+    internal_embed_max_batch: int = Field(default=64, ge=1, le=512)
+    internal_embed_max_text_chars: int = Field(default=8000, ge=1, le=100_000)
     # Must equal the vector column size created by migration 0002 (vector(384)). The
     # provider verifies the loaded model's dimension against this value.
     embedding_dimension: int = Field(default=384, ge=1, le=4096)
     embedding_batch_size: int = Field(default=32, ge=1, le=512)
     embedding_device: str = "cpu"
-    # PyTorch intra-op threads per process for embedding/reranking (0 = torch default,
-    # one per core). Small models are much faster with few threads when several
+    # Intra-op threads per process for embedding/reranking (ONNX Runtime or PyTorch;
+    # 0 = library default, one per core). Small models are much faster with few threads when several
     # processes share the CPU; see app/ai/embeddings.py:apply_torch_threads.
     torch_num_threads: int = Field(default=2, ge=0, le=64)
     # Prefix the model card recommends for retrieval queries (documents get no prefix).
@@ -305,6 +321,16 @@ class Settings(BaseSettings):
             raise ValueError("CLIENT_IP_HEADER_SECRET must be empty or at least 24 characters")
         return value
 
+    @field_validator("internal_embed_secret")
+    @classmethod
+    def _internal_embed_secret_strength(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value()) < MIN_INTERNAL_SECRET_LENGTH:
+            raise ValueError(
+                f"INTERNAL_EMBED_SECRET must be empty or at least {MIN_INTERNAL_SECRET_LENGTH} "
+                "characters"
+            )
+        return value
+
     @field_validator("jwt_algorithm")
     @classmethod
     def _restrict_algorithm(cls, value: str) -> str:
@@ -339,6 +365,8 @@ class Settings(BaseSettings):
         "storage_s3_endpoint_url",
         "storage_s3_access_key_id",
         "storage_s3_secret_access_key",
+        "embedding_remote_url",
+        "internal_embed_secret",
         mode="before",
     )
     @classmethod
@@ -385,6 +413,24 @@ class Settings(BaseSettings):
         if self.stale_job_timeout_seconds <= self.celery_task_time_limit:
             problems.append("STALE_JOB_TIMEOUT_SECONDS must exceed CELERY_TASK_TIME_LIMIT")
         problems.extend(self._object_storage_problems())
+        problems.extend(self._embedding_problems())
+        return problems
+
+    def _embedding_problems(self) -> list[str]:
+        problems: list[str] = []
+        if self.embedding_provider == "remote":
+            if self.embedding_remote_url is None:
+                problems.append("EMBEDDING_REMOTE_URL is required when EMBEDDING_PROVIDER=remote")
+            elif not self.embedding_remote_url.startswith(("https://", "http://")):
+                problems.append("EMBEDDING_REMOTE_URL must be an http(s) URL")
+            if self.internal_embed_secret is None:
+                problems.append("INTERNAL_EMBED_SECRET is required when EMBEDDING_PROVIDER=remote")
+        torch_needed = self.embedding_provider == "sentence-transformers" or self.reranking_enabled
+        if torch_needed and importlib.util.find_spec("sentence_transformers") is None:
+            problems.append(
+                "EMBEDDING_PROVIDER=sentence-transformers and RERANKING_ENABLED need the "
+                "optional torch extra (uv sync --extra torch); use EMBEDDING_PROVIDER=onnx"
+            )
         return problems
 
     def _object_storage_problems(self) -> list[str]:
@@ -422,6 +468,8 @@ class Settings(BaseSettings):
             problems.append("LLM_BASE_URL must use https:// in production")
         if self.rate_limit_enabled and self.rate_limit_backend == "memory":
             problems.append("RATE_LIMIT_BACKEND=memory is per-process; use redis in production")
+        if self.internal_embed_secret is not None and _is_placeholder(self.internal_embed_secret):
+            problems.append("INTERNAL_EMBED_SECRET still has its .env.example placeholder value")
         if self.log_level == "DEBUG":
             problems.append("LOG_LEVEL=DEBUG is not allowed in production")
         return problems

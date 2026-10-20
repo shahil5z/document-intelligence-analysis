@@ -9,7 +9,7 @@ from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.exc import OperationalError
 
-from app.ai.factory import create_embedding_provider
+from app.ai.factory import create_embedding_provider, create_token_counter
 from app.core.config import get_settings
 from app.core.request_context import RequestContext, bind_context, reset_context
 from app.db.session import get_session_factory
@@ -63,7 +63,8 @@ def process_document(
     )
     try:
         settings = get_settings()
-        # Cached per worker process; the model itself loads on the first embed call.
+        # Cached per worker process; the model loads on the first embed call (or, with
+        # EMBEDDING_PROVIDER=remote, embedding is delegated to the API).
         embedder = create_embedding_provider(settings)
         processor = DocumentProcessor(
             session_factory=get_session_factory(),
@@ -72,7 +73,8 @@ def process_document(
                 settings=settings,
                 session_factory=get_session_factory(),
                 embedder=embedder,
-                token_counter=embedder,
+                # Tokenizer only: chunking never needs the model weights.
+                token_counter=create_token_counter(settings),
             ),
             max_attempts=max_claim_attempts(settings.celery_task_max_retries),
             timeout_errors=(SoftTimeLimitExceeded,),
