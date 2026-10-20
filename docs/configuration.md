@@ -75,3 +75,17 @@ pipeline, which read `LLM_*` and `EMBEDDING_*`).
 S3 / OCI storage: `STORAGE_BACKEND=s3|oci` with `STORAGE_S3_BUCKET`,
 `STORAGE_S3_ENDPOINT_URL`, `STORAGE_S3_REGION`, `STORAGE_S3_ACCESS_KEY_ID`,
 `STORAGE_S3_SECRET_ACCESS_KEY`, `STORAGE_S3_PREFIX`.
+
+## Live demo values (2026-10-20)
+
+Non-secret settings in the server's `.env.production` for the public demo:
+
+| Key | Value |
+| --- | --- |
+| `CORS_ALLOWED_ORIGINS` | `https://doc-intelligence-shahil.vercel.app,https://document-intelligence-analysis-shahils-projects-e75357dc.vercel.app` |
+| `RATE_LIMIT_ASK` / `RATE_LIMIT_ASK_DAILY` | `10/hour` / `30/day` per user |
+| `DEMO_MAX_QUESTIONS` / `RATE_LIMIT_DEMO` / `RATE_LIMIT_DEMO_GLOBAL` | `3` / `3/day` per IP / `50/day` |
+| `EMBEDDING_PROVIDER` | `onnx` (API); the micro override sets `remote` for the worker |
+
+`CLIENT_IP_HEADER_SECRET` is set and matches `DIP_CLIENT_IP_SECRET` on Vercel (values
+are not recorded anywhere in the repository).

@@ -1,199 +1,256 @@
 # Document Intelligence & Analysis
 
-Upload PDF, DOCX and TXT files, search them (semantic, keyword or hybrid), and ask
-questions that are answered only from your own documents, with numbered citations to
-the passages that were used.
+Upload PDF, DOCX or TXT files, search them by meaning or by keyword, and ask questions
+that are answered only from your own documents, with numbered citations back to the
+passages that were used.
 
-![Landing page](docs/screenshots/landing-desktop-dark.png)
+- **Live demo:** https://doc-intelligence-shahil.vercel.app
+- **Backend API:** https://api-140-245-232-103.sslip.io (health: `/health/ready`)
+- **GitHub:** https://github.com/shahil5z/document-intelligence-analysis
 
-## What it is
+Register with any e-mail address (no verification) or use the temporary demo account
+on the landing page. The demo backend runs on a free 1 GB VM, so the first request
+after a quiet period can take a few seconds.
 
-A multi-user document question-answering system built around retrieval-augmented
-generation (RAG). A FastAPI backend stores documents and their chunks in PostgreSQL
-with pgvector; a Celery worker extracts, chunks and embeds text in the background; a
-Next.js frontend talks to the API through its own server-side routes. Every query is
-scoped to the document owner inside SQL, and answers cite the retrieved passages.
+![Answer with citations on the live demo](docs/screenshots/live-ask-citations.png)
 
-## Why I built it
+## Key features
 
-I wanted a project that goes past a notebook RAG demo: real accounts, background jobs
-that can fail and be retried, a database that does both vector and full-text search,
-answers that can be checked against their sources, tests against a real database, and
-a deployment setup I could run on a small cloud VM.
-
-## Features
-
-- Accounts: register / login with Argon2id password hashing and JWT access tokens,
-  user and admin roles, admin endpoints, audit log.
-- Uploads: PDF, DOCX and TXT up to 10 MB, checked by extension, MIME type and magic
-  bytes; per-user duplicate detection; storage on a local volume or any S3-compatible
-  service (including OCI Object Storage).
-- Background processing: Celery pipeline with an explicit job state machine, bounded
-  retries, terminal failure states and a stale-job reconciler run by Celery beat.
-- Retrieval: semantic (pgvector HNSW), keyword (PostgreSQL full-text search) and hybrid
-  (reciprocal rank fusion), with optional cross-encoder reranking (off by default).
-- Question answering (`/ask`): grounded answers with validated `[S#]` citations; returns
-  "insufficient evidence" without calling the LLM when retrieval is weak; returns 503
-  when no LLM is configured.
-- Demo mode: a temporary account (1 PDF, 3 questions, removed after 24 hours) that can
-  be converted into a normal account ([docs/demo-mode.md](docs/demo-mode.md)).
-- Hardening: Redis-backed rate limits, request body limits, security headers,
-  Prometheus metrics, JSON logs that exclude secrets and document text.
-- Frontend: dashboard, upload with progress, document list and detail, search, ask
-  with clickable citations, light/dark theme, mobile layout.
+- Accounts with Argon2id password hashing and short-lived JWTs, kept server-side in an
+  HttpOnly cookie by the Next.js frontend.
+- Uploads up to 10 MB, checked by extension, MIME type and magic bytes, with per-user
+  duplicate detection.
+- Background processing (extract, clean, chunk, embed, index) in a Celery worker, with
+  a visible status per document and bounded retries.
+- Three search modes: semantic (pgvector), keyword (PostgreSQL full-text) and hybrid
+  (reciprocal rank fusion).
+- AI question answering (RAG) with validated citations and the cited passage shown
+  next to the answer.
+- Every query is scoped to the document owner in SQL; other users' documents return 404.
+- Rate limits, security headers, JSON logs without secrets or document text.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    browser[Browser] --> next[Next.js frontend and BFF]
-    next -->|JWT bearer| caddy[Caddy reverse proxy, HTTPS]
-    browser -->|direct upload with short-lived token| caddy
-    caddy --> api[FastAPI API]
-    api --> pg[(PostgreSQL + pgvector)]
-    api --> redis[(Redis)]
-    api -->|/ask only| llm[OpenAI LLM]
-    redis -->|task queue| worker[Celery worker with beat]
-    worker --> pg
+    user[Browser] --> vercel["Next.js on Vercel<br/>(pages + BFF route handlers)"]
+    vercel -->|"server-side, JWT from HttpOnly cookie"| caddy
+    user -->|"direct upload, 5-minute upload token"| caddy
+    subgraph oracle["Oracle Cloud VM (1 GB RAM)"]
+        caddy["Caddy (HTTPS)"] --> api["FastAPI API<br/>ONNX embedding model"]
+        api --> pg[("PostgreSQL + pgvector")]
+        api --> redis[("Redis")]
+        api --> files[("Storage volume")]
+        redis -->|task queue| worker["Celery worker + beat"]
+        worker -->|"POST /internal/embed"| api
+        worker --> pg
+        worker --> files
+    end
+    api -->|"/ask only"| openai["OpenAI (gpt-4o-mini)"]
 ```
 
-Caddy is used in the production compose file; in local development the frontend calls
-the API directly on port 8000. Inside the API the layers are routes -> services
-(transaction boundaries) -> repositories (owner-scoped queries) -> SQLAlchemy models.
-More detail: [docs/architecture.md](docs/architecture.md) and the decision records in
-[docs/adr/](docs/adr).
+The browser never talks to Postgres, Redis or the internal endpoint: Caddy publishes
+only the API and returns 404 for `/internal/*` and `/metrics`.
+
+![Dashboard](docs/screenshots/live-dashboard.png)
 
 ## Tech stack
 
-- Backend: Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (sync, psycopg 3), Alembic,
-  PyJWT, pwdlib (Argon2id), pypdf, python-docx, ONNX Runtime + tokenizers (CPU, no PyTorch),
-  boto3, gunicorn + uvicorn workers, uv.
-- Data: PostgreSQL 16 with pgvector (HNSW) and full-text search, Redis 7.
-- Jobs: Celery 5 (worker + beat).
-- Frontend: Next.js (App Router), TypeScript, Playwright for end-to-end tests.
-- Ops: Docker Compose, Caddy, shell scripts for deploy / backup / restore / health.
-- Quality: pytest, ruff, mypy (strict).
+- **Backend:** Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2, Alembic, PyJWT, pwdlib
+  (Argon2id), pypdf, python-docx, ONNX Runtime + tokenizers, gunicorn/uvicorn, uv.
+- **Data:** PostgreSQL 16 with pgvector (HNSW) and full-text search, Redis 7.
+- **Jobs:** Celery 5 (worker with beat).
+- **Frontend:** Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4.
+- **AI:** `BAAI/bge-small-en-v1.5` embeddings (384 dimensions) via ONNX Runtime;
+  OpenAI `gpt-4o-mini` for answers.
+- **Ops:** Docker Compose, Caddy, Oracle Cloud (backend), Vercel (frontend).
+- **Quality:** pytest, ruff, mypy (strict), Playwright, gitleaks.
 
-## Document pipeline
+## How it works
 
-1. **Upload**: `POST /documents` validates the file, stores it, creates a document row
-   and a processing job, and queues a Celery task. The response returns immediately.
-2. **Async processing**: the worker picks up the job and moves it through explicit
-   stages; failures are retried a bounded number of times, then marked failed. A beat
-   task resets jobs that got stuck (for example after a worker crash).
-3. **Extraction**: pypdf for PDFs, python-docx for DOCX (body paragraphs and tables),
-   plain decoding for TXT. Scanned PDFs without a text layer fail with a clear message.
-4. **Cleaning and chunking**: whitespace/Unicode normalisation, then token-aware chunks
-   (default 400 tokens with 60 overlap, capped per document).
-5. **Embeddings**: `BAAI/bge-small-en-v1.5` (384 dimensions), its fp32 ONNX export run
-   with ONNX Runtime on CPU (CLS pooling, L2 normalisation; no PyTorch in the image).
-   On the 1 GB VM a single model copy lives in the API: the API embeds queries, and the
-   worker sends document chunks to the API's internal `POST /internal/embed`
-   (shared-secret header, blocked at Caddy). Chunking counts tokens with the model's
-   tokenizer only.
-6. **Indexing**: chunks are stored in `document_chunks` with a `vector(384)` column
-   (HNSW cosine index) and a generated `tsvector` column (GIN index).
-7. **Retrieval**: semantic, keyword or hybrid search over the user's completed
-   documents (see below).
-8. **RAG**: `/ask` retrieves passages, drops weak ones by a similarity threshold, and
-   builds a prompt where the passages are numbered sources and treated as data, not
-   instructions.
-9. **Answer with citations**: the LLM returns an answer that cites `[S1]`, `[S2]`, ...;
-   citations are validated against the passages that were actually sent, and invalid
-   ones are removed.
+1. **Upload.** The browser gets a 5-minute upload-only token from the frontend server
+   and sends the file straight to the API (Vercel functions cap request bodies at
+   about 4.5 MB). The API validates and stores the file, creates a job and returns at
+   once.
+2. **Processing.** The worker extracts text (pypdf, python-docx, plain text),
+   normalises it and splits it into token-aware chunks (400 tokens, 60 overlap).
+3. **Embedding and indexing.** Chunks are embedded and stored with a `vector(384)`
+   column (HNSW cosine index) and a generated `tsvector` column (GIN index).
+4. **Status.** The frontend polls the document and shows queued, processing,
+   completed or failed.
+5. **Search and ask.** Queries are embedded by the API and run against the user's
+   completed documents only.
 
-Details: [docs/document-processing.md](docs/document-processing.md),
-[docs/retrieval.md](docs/retrieval.md), [docs/rag.md](docs/rag.md).
+## Search modes
 
-## Why Redis and Celery
+- **Semantic:** nearest chunks by cosine similarity. Finds paraphrases, weaker for
+  exact codes and names.
+- **Keyword:** PostgreSQL full-text search. Exact terms, no synonyms.
+- **Hybrid** (default): runs both and merges the rankings with reciprocal rank fusion.
 
-Extraction and embedding take seconds to minutes and use a lot of CPU and memory, so
-they should not run inside an HTTP request. Celery gives a separate worker process with
-retries and time limits, and beat runs periodic jobs (stale-job reconciler, demo
-cleanup). Redis is the Celery broker and also stores the rate-limit counters, so limits
-are shared across API processes.
+![Hybrid search](docs/screenshots/live-search-hybrid.png)
 
-## Why PostgreSQL + pgvector
+## AI Q&A and citations
 
-The documents, users, jobs and chunks are relational data that need transactions and
-owner scoping. pgvector keeps vectors in the same database, so one SQL query can apply
-the owner filter and the vector search together, and PostgreSQL full-text search covers
-keyword retrieval. That avoids running and syncing a separate vector database.
+`/ask` retrieves passages, drops weak ones below a similarity threshold, and sends the
+rest to the LLM as numbered sources that are treated as data, not instructions. If
+nothing relevant is found, it answers "insufficient evidence" without calling the LLM.
+The model must cite sources; the backend keeps only citation numbers that were really
+in the prompt and returns each with the document name, page and passage text. The UI
+shows the answer with clickable citation markers and the source passages under it.
+A citation shows which passage the model used; it does not prove the claim.
 
 ## Authentication
 
-- Passwords are hashed with Argon2id.
-- Login returns a signed JWT access token (HS256 by default) with `sub`, `role`,
-  `type`, `jti`, `iat`, `exp` and `iss`; all of these are required when the token is
-  decoded, and the algorithm and issuer are pinned. Default lifetime is 30 minutes.
-- The user is reloaded from the database on every request, so deleted or deactivated
-  users are rejected.
-- A separate short-lived (300 s) upload token is only valid for `POST /documents`, so
-  the browser can upload directly to the API.
-- In the browser the Next.js server stores the token in an HttpOnly cookie and proxies
-  API calls, with a CSRF header and origin check
-  ([ADR-006](docs/adr/ADR-006-frontend-auth-bff.md)).
-- There are no refresh tokens and no token revocation list; a session ends when the
-  token expires.
-- Another user's documents return 404, not 403.
+- Register/login go through Next.js route handlers, which call the API server-side and
+  store the JWT in an HttpOnly, Secure, SameSite=Lax cookie. Page scripts never see it.
+- Other API calls go through `/api/proxy/*` (an allow-list), with a CSRF header and
+  origin check on writes.
+- Tokens are signed (HS256), carry `sub`, `role`, `jti`, `iat`, `exp`, `iss`, and last
+  30 minutes. The user is reloaded on every request.
+- Logout deletes the cookie; protected pages redirect to `/login` and the API answers
+  401 without a token.
 
-## Semantic search vs keyword vs hybrid vs question answering
+## Background processing
 
-- **Semantic**: embeds the query and finds chunks with the closest vectors (cosine).
-  Good for paraphrases, weaker for exact names or codes.
-- **Keyword**: PostgreSQL full-text search (`tsvector` with `plainto_tsquery`). Good
-  for exact terms, misses synonyms.
-- **Hybrid**: runs both and merges the rankings with reciprocal rank fusion.
-- **Question answering (`/ask`)**: uses retrieval to collect evidence and then asks the
-  LLM to write an answer from those passages only, with citations. Search returns
-  passages; `/ask` returns an answer.
+Redis is the Celery broker and also holds the rate-limit counters. Each document has a
+processing job with an explicit state machine: transient errors are retried a bounded
+number of times, permanent ones (for example a PDF without a text layer) fail with a
+clear message, and a beat task resets jobs left behind by a crashed worker. On the
+1 GB VM beat runs inside the worker process to save memory.
 
-## Citations
+## ONNX optimization
 
-Each passage sent to the LLM gets an id (`S1`, `S2`, ...) linked to a document and
-chunk. After the LLM replies, the backend keeps only citation ids that were in the
-prompt and returns them with document name, chunk position and the passage text, so the
-frontend can show what each claim is based on. This shows which passage the model
-pointed at; it does not prove the passage supports the claim.
+The first deployment used PyTorch + sentence-transformers, with one model copy in the
+API and another in the worker. On the 1 GB VM that did not fit. The model now runs as
+its fp32 ONNX export on ONNX Runtime, and only the API loads it; the worker sends chunk
+batches to the API's private `POST /internal/embed` (shared-secret header) and counts
+tokens with the tokenizer file alone.
 
-## Environment variables
+Measured on the production VM:
 
-All variables and defaults are in [docs/configuration.md](docs/configuration.md), with
-templates in [.env.example](.env.example),
-[.env.production.example](.env.production.example) and
-[frontend/.env.example](frontend/.env.example). The templates contain placeholders
-only; real `.env` files are git-ignored.
+| | Before (PyTorch) | After (ONNX) |
+| --- | --- | --- |
+| Processing a small PDF | failed after ~4 min | completed in 31 s |
+| Docker image | 2.23 GB | 712 MB |
+| Image build on the VM | 21 min | 12 min |
+| Embedding model copies in memory | 2 | 1 |
 
-## Production / deployment architecture
+On the live demo a one-page PDF went from upload to completed in about 25 s.
 
-`docker-compose.prod.yml` runs on one VM: Caddy (the only service with published ports,
-80/443, automatic HTTPS, `/metrics` blocked), the API under gunicorn, a Celery worker,
-Celery beat, a one-shot migration job, and PostgreSQL + Redis on an internal network.
-The frontend is meant for Vercel. `docker-compose.micro.yml` is an override for a
-1 GB VM (smaller memory limits, one API worker, beat inside the worker,
-one embedding model copy in the API with the worker on `EMBEDDING_PROVIDER=remote`,
-`deploy/caddy/Caddyfile.micro`). Guides:
-[docs/production-deployment.md](docs/production-deployment.md),
+## Technical decisions
+
+1. **FastAPI:** typed request/response models, dependency injection for auth and DB
+   sessions, OpenAPI for free.
+2. **PostgreSQL + pgvector:** vectors live next to the relational data, so the owner
+   filter and the vector search are one SQL query, with no second database to sync.
+3. **Redis + Celery:** extraction and embedding are too slow for a request; Celery
+   adds retries and time limits, and Redis also backs the shared rate limits.
+4. **Hybrid search:** semantic search misses exact terms and keyword search misses
+   paraphrases; rank fusion covers both without tuning score scales.
+5. **RAG with validated citations:** answers come only from retrieved passages, and
+   citations not in the prompt are removed.
+6. **ONNX Runtime:** same model and embeddings as PyTorch at a fraction of the image
+   size and memory, no torch dependency.
+7. **Single model copy:** the API owns the model and the worker calls it internally,
+   so memory holds one copy instead of two.
+8. **Oracle Cloud:** an always-free VM is enough for a demo backend with Postgres,
+   Redis and the worker.
+9. **Vercel:** hosts the Next.js frontend and its server-side BFF; pushes to `main`
+   deploy automatically.
+10. **Designing for 1 GB RAM:** explicit container memory limits, one gunicorn worker,
+    beat inside the worker, lazy model loading and swap.
+
+## Testing
+
+**Automated (run locally on 2026-10-20 at the release commit):**
+
+- Backend: `pytest` 512 passed, 11 skipped (S3 tests without an S3 server), against
+  real PostgreSQL + pgvector and Redis; `ruff check`, `ruff format --check`, strict
+  `mypy` and `alembic check` all clean.
+- Frontend: `npm run lint`, `npm run typecheck` and `npm run build` clean.
+- Playwright: 21 passed, against the production compose stack on a local machine with
+  a stub LLM (no OpenAI calls).
+
+The GitHub Actions workflow in `.github/workflows/ci.yml` runs the same checks; it has
+not run on this repository yet, so no CI result is claimed here.
+
+**End-to-end against the live demo** (headless Playwright, 2026-10-20): register, log
+in, upload a PDF (queued, processing, completed), semantic and hybrid search, one real
+`/ask` call with an answer and a citation, refresh with the session intact, logout,
+protected pages redirect to `/login`, and the proxy and API return 401.
+
+**Production checks:** `/health/ready` reports database, pgvector and Redis ok;
+`/internal/embed` and `/metrics` return 404 from the internet; CORS allows only the
+Vercel origins; gitleaks finds no secrets in the history.
+
+Details: [docs/testing.md](docs/testing.md).
+
+## Local development
+
+```bash
+python3 scripts/generate_env.py          # writes .env with fresh local secrets
+docker compose up --build -d             # postgres, redis, api (:8000), worker
+cd frontend && cp .env.example .env.local && npm ci && npm run dev   # :3000
+```
+
+Without `OPENAI_API_KEY`, `/ask` returns 503; add
+`-f docker-compose.stub-llm.yml` for a local stub. More in
+[docs/local-development.md](docs/local-development.md).
+
+## Deployment architecture
+
+- **Frontend:** Vercel project with root directory `frontend/`, linked to this repo
+  (push to `main` deploys). `NEXT_PUBLIC_API_URL` points at the API;
+  `DIP_CLIENT_IP_SECRET` (server-only) lets the BFF pass the browser IP for per-IP
+  limits.
+- **Backend:** one Oracle Cloud VM (1 GB RAM + 4 GB swap) running
+  `docker-compose.prod.yml` with the `docker-compose.micro.yml` override: Caddy, API,
+  worker, migrate job, Postgres and Redis. Only ports 22/80/443 are open.
+- Demo cost limits: `/ask` 10 per hour and 30 per day per user; demo accounts get 3
+  questions, with at most 50 demo accounts per day.
+
+Guides: [docs/vercel-deployment.md](docs/vercel-deployment.md),
 [docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md),
-[docs/vercel-deployment.md](docs/vercel-deployment.md),
-[docs/deployment-checklist.md](docs/deployment-checklist.md),
-[docs/backup-and-recovery.md](docs/backup-and-recovery.md).
+[docs/production-deployment.md](docs/production-deployment.md),
+[docs/configuration.md](docs/configuration.md).
+
+## Project structure
+
+```
+app/            FastAPI app: api routes, services, repositories, ai, processing, workers
+alembic/        database migrations
+frontend/       Next.js app (pages, BFF route handlers, Playwright tests)
+deploy/caddy/   Caddy configs
+scripts/        deploy, backup, env generation, evaluation, e2e helpers
+tests/          unit, API and integration tests
+docs/           architecture, deployment, ADRs, screenshots
+```
 
 ## Known limitations
 
-- On a 1 GB VM memory is tight (about 300 MB available at idle, swap in use): the
-  first embedding after a restart loads the model (about 12 s) and the first searches
-  after idle can take seconds while pages are swapped back in. Embedding runs inside
-  the single API process, so document embedding and requests share one CPU.
-- `/metrics` has no authentication; it is only protected by not being exposed (Caddy
-  returns 404 for it and it is reachable only inside the compose network).
-- No refresh tokens, token revocation or account lockout.
-- No OCR: scanned PDFs fail. DOCX extraction reads body paragraphs and tables only (no
-  headers/footers, footnotes, comments or text boxes; no legacy `.doc`).
-- Retrieval quality was evaluated on 18 synthetic queries over 6 short documents; the
-  evidence threshold was calibrated only on that set.
-- Live OpenAI answering is not verified in production.
-- Single VM: no replication or failover; fixed-window rate limits.
+- **No OCR:** scanned PDFs without a text layer fail. DOCX reads body paragraphs and
+  tables only; no legacy `.doc`.
+- **Local volume storage** on the single VM (S3/OCI storage is implemented but not used
+  in the demo); no replication or failover.
+- **1 GB VM:** the first embedding after a restart loads the model (about 12 s), swap
+  is in use, and the first request after idle can be slow. Document embedding and API
+  requests share one CPU.
+- **Metrics** have no authentication; they are only kept private by Caddy and the
+  internal network.
+- **Sessions:** no refresh tokens, no token revocation and no account lockout; logging
+  out removes the cookie, and the token expires after 30 minutes.
+- **Rate limits** are fixed-window. Registration needs no e-mail verification.
+- Retrieval quality was evaluated on a small synthetic set (18 queries, 6 documents).
+- The Impressum and privacy pages still contain placeholders.
+
+## Future improvements
+
+- OCR for scanned PDFs.
+- Object storage and a larger or second VM.
+- Refresh tokens with server-side revocation.
+- Streaming answers.
+- A larger retrieval evaluation set and optional reranking on bigger hardware.
 
 ## Author
 

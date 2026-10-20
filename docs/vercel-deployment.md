@@ -1,10 +1,15 @@
 # Frontend on Vercel
 
 The Next.js app in `frontend/` (App Router, TypeScript, Tailwind) is designed for
-Vercel. Status: **CONFIGURED BUT NOT DEPLOYED** (no Vercel account was available).
-`npm run lint`, `npm run typecheck` and `npm run build` pass locally, and the Playwright
-suite passes against `next start` in front of the production compose stack (see
-[verification report](history/final-project-report.md)).
+Vercel.
+
+**Status: deployed.** Production: https://doc-intelligence-shahil.vercel.app (also
+`document-intelligence-analysis-shahils-projects-e75357dc.vercel.app`). Vercel project
+`document-intelligence-analysis`, root directory `frontend`, framework Next.js, Node 22,
+linked to `shahil5z/document-intelligence-analysis` (pushes to `main` deploy to
+production). Vercel Authentication protects preview deployments only, so the
+production demo is public. Verified on 2026-10-20 with a headless Playwright run
+against the live URL (register, upload, search, one real `/ask`, logout).
 
 ## How the frontend talks to the API
 
@@ -34,8 +39,10 @@ Details and alternatives: [ADR-006](adr/ADR-006-frontend-auth-bff.md).
    | Name | Value | Secret? |
    | --- | --- | --- |
    | `NEXT_PUBLIC_API_URL` | `https://<API_DOMAIN>` (no trailing slash) | **No.** It is compiled into the browser bundle and the CSP. Never put a key in any `NEXT_PUBLIC_*` variable. |
+   | `DIP_CLIENT_IP_SECRET` | random, equal to `CLIENT_IP_HEADER_SECRET` on the API | **Yes**, server-only (Vercel type *sensitive*, Production). Lets the BFF pass the browser IP so per-IP limits (register, login, demo) count real users instead of Vercel's egress IPs. |
 
-   No other variable is needed; the OpenAI key lives only on the API server.
+   Live values: `NEXT_PUBLIC_API_URL=https://api-140-245-232-103.sslip.io`. The OpenAI key
+   lives only on the API server.
    `NEXT_PUBLIC_*` values are fixed at build time: after changing it, redeploy.
 4. Deploy. Note the production URL, e.g. `https://dip-yourname.vercel.app`.
 5. On the server set `CORS_ALLOWED_ORIGINS=https://dip-yourname.vercel.app` in
@@ -54,9 +61,10 @@ microphone, geolocation off), `Cross-Origin-Opener-Policy: same-origin`, no
 
 ## Limitations on Vercel
 
-- Per-IP rate limits on register/login are counted against Vercel's egress IPs, because
-  the BFF calls the API from Vercel. The per-e-mail login limit still applies. Uploads,
-  search and ask are limited per user.
+- Without `DIP_CLIENT_IP_SECRET`, per-IP rate limits on register/login/demo would count
+  Vercel's egress IPs, because the BFF calls the API from Vercel. With it set (as in
+  production) the API uses the forwarded browser IP. Uploads, search and ask are
+  limited per user.
 - The session lifetime equals the API token lifetime (30 minutes by default); there are
   no refresh tokens, so users sign in again after expiry.
 - `/api/proxy` runs with `maxDuration = 60` seconds; `/ask` normally finishes far
