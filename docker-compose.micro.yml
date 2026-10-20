@@ -1,0 +1,57 @@
+# Override for a 1 GB VM (e.g. Oracle VM.Standard.E2.1.Micro). Use: docker compose -f docker-compose.prod.yml -f docker-compose.micro.yml --env-file .env.production ...
+services:
+  postgres:
+    command: [postgres, -c, shared_buffers=64MB, -c, work_mem=4MB, -c, maintenance_work_mem=32MB, -c, max_connections=30, -c, effective_cache_size=256MB]
+    shm_size: 64m
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 300m}
+  redis:
+    command:
+      - sh
+      - -c
+      - >-
+        umask 077 &&
+        rm -f /tmp/redis-auth.conf &&
+        printf 'requirepass %s\n' "$$REDIS_PASSWORD" > /tmp/redis-auth.conf &&
+        chown redis:redis /tmp/redis-auth.conf &&
+        unset REDIS_PASSWORD &&
+        exec docker-entrypoint.sh redis-server /tmp/redis-auth.conf --appendonly yes
+        --maxmemory 32mb --maxmemory-policy noeviction
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 96m}
+  migrate:
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 400m}
+  api:
+    environment:
+      WEB_CONCURRENCY: "1"
+      TORCH_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 450m}
+  worker:
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "-B", "--schedule", "/tmp/beat/celerybeat-schedule", "--loglevel=INFO", "--concurrency=1", "--max-tasks-per-child=200"]
+    environment:
+      TORCH_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    tmpfs:
+      - /tmp/prometheus:mode=1777,size=16m
+      - /tmp/beat:mode=1777,size=8m
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 900m}
+  beat:
+    profiles: [disabled]
+  caddy:
+    volumes:
+      - ./deploy/caddy/Caddyfile.micro:/etc/caddy/Caddyfile:ro
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 96m}
