@@ -152,54 +152,6 @@ prompt and returns them with document name, chunk position and the passage text,
 frontend can show what each claim is based on. This shows which passage the model
 pointed at; it does not prove the passage supports the claim.
 
-## Testing
-
-Automated (backend): unit, API and integration tests with pytest, run against real
-PostgreSQL + pgvector and Redis. Last verified local run on the `final` branch:
-**488 passed, 14 skipped, 96% line coverage** (the skipped tests need an S3-compatible
-server or an authenticated Redis). ruff and mypy (strict) were clean.
-
-Automated (frontend): lint, typecheck and build; Playwright end-to-end suite with
-21 tests (`frontend/e2e`), run locally against a production-like Docker stack.
-
-Manual / local / production:
-
-- Manual checklist: [docs/manual-testing.md](docs/manual-testing.md).
-- Production on an Oracle Cloud VM: the deployment came up and the health check passes
-  over HTTPS.
-- On that 1 GB VM, document processing failed because of memory limits and timeouts.
-- `/ask` against the real OpenAI API has not been verified in production; it was tested
-  with recorded reply fixtures and a local stub LLM.
-- GitHub Actions workflows are included but have not been run on GitHub yet.
-
-```bash
-uv run ruff check . && uv run mypy app tests scripts
-export TEST_DATABASE_URL=postgresql+psycopg://dip:dip@localhost:5433/dip_test
-uv run pytest --cov=app
-cd frontend && npm run lint && npm run typecheck && npm run build
-```
-
-More: [docs/testing.md](docs/testing.md).
-
-## Local development
-
-Requirements: Docker with Compose, Python 3.12 + uv, Node.js 20.9+.
-
-```bash
-git clone https://github.com/shahil5z/document-intelligence-analysis.git
-cd document-intelligence-analysis
-python3 scripts/generate_env.py            # writes .env with random secrets
-docker compose up --build -d               # postgres, redis, migrate, api, worker
-curl http://localhost:8000/health/ready    # API docs at http://localhost:8000/docs
-
-cd frontend && cp .env.example .env.local && npm ci && npm run dev   # http://localhost:3000
-```
-
-Upload and search work without an OpenAI key; `/ask` needs `OPENAI_API_KEY` or the
-stub LLM (`docker-compose.stub-llm.yml`). Windows commands and running without Docker:
-[docs/local-development.md](docs/local-development.md). Setting up on a new machine:
-[docs/new-machine-setup.md](docs/new-machine-setup.md).
-
 ## Environment variables
 
 All variables and defaults are in [docs/configuration.md](docs/configuration.md), with
@@ -237,28 +189,9 @@ The frontend is meant for Vercel. `docker-compose.micro.yml` is an override for 
 - Live OpenAI answering is not verified in production.
 - Single VM: no replication or failover; fixed-window rate limits.
 
-## Project structure
+## Author
 
-```text
-app/            FastAPI app: api routes, core config/security, db models and
-                repositories, processing, ai (embeddings, LLM), services, storage, workers
-alembic/        database migrations
-frontend/       Next.js frontend (BFF routes, pages, Playwright e2e)
-tests/          unit, api and integration tests
-scripts/        env generator, deploy, backup/restore, health and smoke tests
-deploy/caddy/   Caddyfiles (production, e2e, 1 GB VM)
-docs/           architecture, ADRs, configuration, deployment, testing, history
-docker-compose*.yml, Dockerfile, pyproject.toml, uv.lock
-```
-
-## Future improvements
-
-- Run embeddings with a single ONNX model copy shared by API and worker to cut memory
-  (in progress, not part of this branch).
-- OCR for scanned PDFs, streaming answers, refresh tokens and revocation.
-- Authentication for `/metrics`.
-- Retrieval evaluation on real documents; load testing.
-- Run the GitHub Actions workflows and fix whatever they find.
+Designed and developed by Shohrab Haque Shahil
 
 ## License
 
