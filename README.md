@@ -5,8 +5,6 @@ that are answered only from your own documents, with numbered citations back to 
 passages that were used.
 
 - **Live demo:** https://doc-intelligence-shahil.vercel.app
-- **Backend API:** https://api-140-245-232-103.sslip.io (health: `/health/ready`)
-- **GitHub:** https://github.com/shahil5z/document-intelligence-analysis
 
 Register with any e-mail address (no verification) or use the temporary demo account
 on the landing page. The demo backend runs on a free 1 GB VM, so the first request
@@ -26,6 +24,8 @@ after a quiet period can take a few seconds.
   (reciprocal rank fusion).
 - AI question answering (RAG) with validated citations and the cited passage shown
   next to the answer.
+- Suggested questions generated from each uploaded document (one small LLM call per
+  document, after processing), with generic suggestions as a fallback.
 - Every query is scoped to the document owner in SQL; other users' documents return 404.
 - Rate limits, security headers, JSON logs without secrets or document text.
 
@@ -46,7 +46,8 @@ flowchart LR
         worker --> pg
         worker --> files
     end
-    api -->|"/ask only"| openai["OpenAI (gpt-4o-mini)"]
+    api -->|"/ask"| openai["OpenAI (gpt-4o-mini)"]
+    worker -->|"suggested questions, once per document"| openai
 ```
 
 The browser never talks to Postgres, Redis or the internal endpoint: Caddy publishes
@@ -62,7 +63,7 @@ only the API and returns 404 for `/internal/*` and `/metrics`.
 - **Jobs:** Celery 5 (worker with beat).
 - **Frontend:** Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4.
 - **AI:** `BAAI/bge-small-en-v1.5` embeddings (384 dimensions) via ONNX Runtime;
-  OpenAI `gpt-4o-mini` for answers.
+  OpenAI `gpt-4o-mini` for answers and suggested questions.
 - **Ops:** Docker Compose, Caddy, Oracle Cloud (backend), Vercel (frontend).
 - **Quality:** pytest, ruff, mypy (strict), Playwright, gitleaks.
 
@@ -76,9 +77,13 @@ only the API and returns 404 for `/internal/*` and `/metrics`.
    normalises it and splits it into token-aware chunks (400 tokens, 60 overlap).
 3. **Embedding and indexing.** Chunks are embedded and stored with a `vector(384)`
    column (HNSW cosine index) and a generated `tsvector` column (GIN index).
-4. **Status.** The frontend polls the document and shows queued, processing,
+4. **Suggested questions.** The worker sends the start of the text (about 10,000
+   characters) to `gpt-4o-mini` once and stores 3-5 questions on the document. If the
+   call fails or no key is set, the job still completes and the UI shows generic
+   suggestions.
+5. **Status.** The frontend polls the document and shows queued, processing,
    completed or failed.
-5. **Search and ask.** Queries are embedded by the API and run against the user's
+6. **Search and ask.** Queries are embedded by the API and run against the user's
    completed documents only.
 
 ## Search modes
@@ -161,43 +166,6 @@ On the live demo a one-page PDF went from upload to completed in about 25 s.
 10. **Designing for 1 GB RAM:** explicit container memory limits, one gunicorn worker,
     beat inside the worker, lazy model loading and swap.
 
-## Testing
-
-**Automated (run locally on 2026-10-20 at the release commit):**
-
-- Backend: `pytest` 512 passed, 11 skipped (S3 tests without an S3 server), against
-  real PostgreSQL + pgvector and Redis; `ruff check`, `ruff format --check`, strict
-  `mypy` and `alembic check` all clean.
-- Frontend: `npm run lint`, `npm run typecheck` and `npm run build` clean.
-- Playwright: 21 passed, against the production compose stack on a local machine with
-  a stub LLM (no OpenAI calls).
-
-The GitHub Actions workflow in `.github/workflows/ci.yml` runs the same checks; it has
-not run on this repository yet, so no CI result is claimed here.
-
-**End-to-end against the live demo** (headless Playwright, 2026-10-20): register, log
-in, upload a PDF (queued, processing, completed), semantic and hybrid search, one real
-`/ask` call with an answer and a citation, refresh with the session intact, logout,
-protected pages redirect to `/login`, and the proxy and API return 401.
-
-**Production checks:** `/health/ready` reports database, pgvector and Redis ok;
-`/internal/embed` and `/metrics` return 404 from the internet; CORS allows only the
-Vercel origins; gitleaks finds no secrets in the history.
-
-Details: [docs/testing.md](docs/testing.md).
-
-## Local development
-
-```bash
-python3 scripts/generate_env.py          # writes .env with fresh local secrets
-docker compose up --build -d             # postgres, redis, api (:8000), worker
-cd frontend && cp .env.example .env.local && npm ci && npm run dev   # :3000
-```
-
-Without `OPENAI_API_KEY`, `/ask` returns 503; add
-`-f docker-compose.stub-llm.yml` for a local stub. More in
-[docs/local-development.md](docs/local-development.md).
-
 ## Deployment architecture
 
 - **Frontend:** Vercel project with root directory `frontend/`, linked to this repo
@@ -214,18 +182,6 @@ Guides: [docs/vercel-deployment.md](docs/vercel-deployment.md),
 [docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md),
 [docs/production-deployment.md](docs/production-deployment.md),
 [docs/configuration.md](docs/configuration.md).
-
-## Project structure
-
-```
-app/            FastAPI app: api routes, services, repositories, ai, processing, workers
-alembic/        database migrations
-frontend/       Next.js app (pages, BFF route handlers, Playwright tests)
-deploy/caddy/   Caddy configs
-scripts/        deploy, backup, env generation, evaluation, e2e helpers
-tests/          unit, API and integration tests
-docs/           architecture, deployment, ADRs, screenshots
-```
 
 ## Known limitations
 

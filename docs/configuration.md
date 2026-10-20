@@ -76,6 +76,15 @@ S3 / OCI storage: `STORAGE_BACKEND=s3|oci` with `STORAGE_S3_BUCKET`,
 `STORAGE_S3_ENDPOINT_URL`, `STORAGE_S3_REGION`, `STORAGE_S3_ACCESS_KEY_ID`,
 `STORAGE_S3_SECRET_ACCESS_KEY`, `STORAGE_S3_PREFIX`.
 
+## Suggested questions
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `QUESTION_SUGGESTIONS_ENABLED` | `true` | One LLM call per processed document (worker), using `LLM_MODEL`, `LLM_BASE_URL` and `OPENAI_API_KEY`. Skipped without a key, with `LLM_PROVIDER=none`, or when the model/base URL is a stub. Failures never fail the job. |
+| `QUESTION_SUGGESTIONS_MAX_INPUT_CHARS` | `10000` | Start of the document text sent (about 2.5k tokens). |
+| `QUESTION_SUGGESTIONS_MAX_OUTPUT_TOKENS` | `200` | |
+| `QUESTION_SUGGESTIONS_TIMEOUT_SECONDS` | `20` | Capped by `LLM_TIMEOUT_SECONDS`. |
+
 ## Live demo values (2026-10-20)
 
 Non-secret settings in the server's `.env.production` for the public demo:
