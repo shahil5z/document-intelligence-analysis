@@ -58,7 +58,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         </h1>
         <p className="mt-1 text-sm text-muted">
           {isRegister
-            ? "Keep your notes and papers in one private place."
+            ? "Your documents stay private to your account."
             : "Welcome back."}
         </p>
         {notice ? (

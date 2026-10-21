@@ -54,7 +54,7 @@ Modified: `app/core/{config,errors,middleware}.py`, `app/main.py`,
 `tests/unit/test_generate_env.py`, `tests/unit/test_storage.py`, `pyproject.toml` +
 `uv.lock` (`prometheus-client>=0.21`, resolved 0.26.0), `.env.example`,
 `docker-compose.yml`, `Dockerfile`, `README.md`, `docs/architecture.md`,
-`docs/SECURITY.md`, `docs/portfolio.md`, this file.
+`docs/SECURITY.md`, `docs/engineering-summary.md`, this file.
 
 ## Results (real runs)
 

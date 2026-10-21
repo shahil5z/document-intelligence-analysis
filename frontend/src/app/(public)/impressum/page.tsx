@@ -30,7 +30,7 @@ export default function ImpressumPage() {
       </p>
       <h2>Purpose of this website</h2>
       <p>
-        {PRODUCT_NAME} is a non-commercial portfolio project that demonstrates document
+        {PRODUCT_NAME} is a non-commercial software project that demonstrates document
         search and question answering with cited sources. <Placeholder>adjust if the site is
         operated commercially, and add company register / VAT details if applicable</Placeholder>
       </p>

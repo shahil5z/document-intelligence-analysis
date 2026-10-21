@@ -6,7 +6,7 @@ const DOC_ID = "11111111-2222-4333-8444-555555555555";
 const GENERATED = [
   "How often are the kiosks inspected?",
   "Who receives fault reports?",
-  "When are study-room displays replaced?",
+  "When are meeting-room displays replaced?",
 ];
 
 function doc(status: string, suggested: string[] | null) {

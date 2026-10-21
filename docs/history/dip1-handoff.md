@@ -73,7 +73,7 @@ app/
 alembic/         env.py, versions/20261017_0001_initial_schema.py
 scripts/         generate_env.py, smoke_test.py
 tests/           unit/, api/, integration/, conftest.py, factories.py
-docs/            architecture.md, portfolio.md, adr/ADR-001..005
+docs/            architecture.md, engineering-summary.md, adr/ADR-001..005
 ```
 
 ## 4. Database schema

@@ -33,7 +33,7 @@ had no Docker/uv/PostgreSQL, see "Not verified".
 | Reprocess | `POST /documents/{id}/reprocess` | completed/failed -> queued (202); queued/processing -> 409. |
 | Status | `GET /documents/{id}/status` | adds `job.stage` and `chunk_count`. |
 | Evaluation | `scripts/evaluate_retrieval.py`, `scripts/calibrate_evidence_threshold.py`, `tests/fixtures/eval_queries.json`, `tests/fixtures/documents/` | Recall@k, Precision@k, MRR@5 per mode; threshold calibration. |
-| Docs | `docs/document-processing.md`, `retrieval.md`, `rag.md`, `SECURITY.md`, `architecture.md`, `portfolio.md`, README | |
+| Docs | `docs/document-processing.md`, `retrieval.md`, `rag.md`, `SECURITY.md`, `architecture.md`, `engineering-summary.md`, README | |
 
 Not implemented: OCR (scanned PDFs fail with "The document contains no extractable text
 (scanned documents are not supported yet)"); soft delete (see discrepancies).

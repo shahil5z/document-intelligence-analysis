@@ -22,7 +22,7 @@ from tests.fakes import MockLLM
 QUESTIONS = [
     "How often are the kiosks inspected?",
     "Who receives fault reports?",
-    "When are study-room displays replaced?",
+    "When are meeting-room displays replaced?",
     "What happens to unsafe equipment?",
 ]
 

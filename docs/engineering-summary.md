@@ -1,6 +1,6 @@
-# Portfolio notes: Document Intelligence & Analysis (final)
+# Engineering summary: Document Intelligence & Analysis
 
-Interview-oriented summary. Each claim below was executed; anything not run is marked
+Technical summary. Each claim below was executed; anything not run is marked
 **NOT VERIFIED** and anything not quantified is marked **Not measured**. Full evidence:
 [verification report](history/final-project-report.md) (stage history in the [DIP1-3
 handoffs](history/)).
