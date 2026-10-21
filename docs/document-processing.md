@@ -133,11 +133,12 @@ script used 120/20 to get several chunks per short fixture document.
   call under a lock; neither the API nor the worker imports torch at startup (tested).
 - `embed_in_batches` embeds `EMBEDDING_BATCH_SIZE` texts per call and validates the
   number and size of returned vectors.
-- Torch is installed from the PyTorch CPU wheel index (`pyproject.toml`
-  `[tool.uv.sources]`); the image is 1.57 GB (measured on the dev box).
+- The default provider is `onnx` (ONNX Runtime, no PyTorch in the image). PyTorch is an
+  optional `torch` extra from the CPU wheel index (`uv sync --extra torch`), needed only
+  for `EMBEDDING_PROVIDER=sentence-transformers` or the reranker.
 - The OpenAI embedding adapter from DIP1 still exists but is not selectable: the
-  `vector(384)` column is tied to the local model. `EMBEDDING_PROVIDER` accepts only
-  `sentence-transformers`.
+  `vector(384)` column is tied to the local model. `EMBEDDING_PROVIDER` accepts `onnx`,
+  `remote` and `sentence-transformers` (see [configuration.md](configuration.md)).
 
 ## Indexing (`IndexStep`)
 

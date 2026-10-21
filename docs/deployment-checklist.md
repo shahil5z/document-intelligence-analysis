@@ -74,7 +74,7 @@ and was **not** done while building the project. Tick the boxes in order. Detail
 - [ ] `scripts/deploy.sh`; then the smoke test with `--with-llm --require-llm`.
 - [ ] `py -3.12 scripts\check_ask_real.py --base-url https://<API_DOMAIN>`: the document-level and
       specific questions must be answered with citations, the off-topic one refused (exit code 0).
-- [ ] Ask a question in the UI; the answer shows `[1]` chips that open the cited passage.
+- [ ] Ask a question in the UI; the answer renders as Markdown under "Answer" with no `[n]` markers, and Copy copies the clean text (citations stay in the API response).
 - [ ] Landing page "Try the demo": upload a PDF, ask 3 questions, the 4th opens "Create a free account to continue".
 
 ## H. GitHub Actions deploy (optional)

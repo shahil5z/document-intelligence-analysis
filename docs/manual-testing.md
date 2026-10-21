@@ -59,7 +59,7 @@ docker compose ps
 ```
 
 Expected: `postgres`, `redis`, `api`, `worker` are `Up ... (healthy)`; `migrate` is
-`Exited (0)`. The first build downloads ~1.5 GB (CPU torch).
+`Exited (0)`. The first build downloads the Python dependencies (the default image uses ONNX Runtime, not PyTorch).
 
 ### 4. Migrations
 

@@ -17,19 +17,19 @@ while this was built. The stack below was run **locally** with a production-like
 ```mermaid
 flowchart LR
     browser[Browser] -->|HTTPS| vercel[Next.js on Vercel<br/>BFF route handlers]
-    vercel -->|HTTPS + Bearer JWT| caddy
-    browser -->|HTTPS direct upload<br/>300 s upload-only token| caddy
-    subgraph vm[VM: docker compose -f docker-compose.prod.yml]
-      caddy[Caddy :80/:443<br/>auto HTTPS, /metrics 404] --> api[api: gunicorn + 2 uvicorn workers]
+    vercel -->|"HTTPS + Bearer JWT"| caddy
+    browser -->|"HTTPS direct upload<br/>300 s upload-only token"| caddy
+    subgraph vm["VM: docker compose -f docker-compose.prod.yml"]
+      caddy["Caddy :80/:443<br/>auto HTTPS, /metrics 404"] --> api["api: gunicorn + 2 uvicorn workers"]
       api --> pg[(postgres + pgvector)]
       api --> redis[(redis)]
-      worker[worker: celery, concurrency 2] --> pg
+      worker["worker: celery, concurrency 2"] --> pg
       worker --> redis
-      beat[beat: single scheduler] --> redis
+      beat["beat: single scheduler"] --> redis
       api --> files[[storage volume or OCI Object Storage]]
       worker --> files
     end
-    api -->|/ask only| llm[OpenAI-compatible API]
+    api -->|"/ask only"| llm[OpenAI-compatible API]
 ```
 
 | Service | Image / command | Network | Published | Limits |
@@ -86,8 +86,8 @@ scripts/deploy.sh                      # first run: the backup step is skipped (
 scripts/health_check.sh --url "https://$(grep ^API_DOMAIN= .env.production | cut -d= -f2)"
 ```
 
-The first build takes several minutes on an Ampere A1 (torch wheels are large; measured
-locally under QEMU emulation at about 3.5 minutes, native is usually faster). The first
+The first build takes several minutes on an Ampere A1 (measured with the earlier PyTorch-based
+image under QEMU emulation at about 3.5 minutes; the default image now uses ONNX Runtime). The first
 document triggers the ~130 MB embedding-model download into the `model_cache` volume.
 
 ## Environment
@@ -181,7 +181,7 @@ was configured while building this): NOT VERIFIED.
 ## Capacity notes (2 OCPU / 12 GB)
 
 - Each API worker and each Celery worker process loads the embedding model
-  (~0.5 GB RSS with torch). 2 + 2 processes plus Postgres (`shared_buffers=512MB`) and
+  (about 0.5 GB RSS each, measured with the earlier PyTorch provider). 2 + 2 processes plus Postgres (`shared_buffers=512MB`) and
   Redis (`maxmemory 400mb`) stay well below 12 GB; swap is a safety net only.
 - `TORCH_NUM_THREADS=1` per process avoids CPU oversubscription with 4 model-loading
   processes on 2 OCPUs (see [performance.md](performance.md) for the effect of

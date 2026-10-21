@@ -13,7 +13,7 @@ sequenceDiagram
     participant S as SearchService
     participant D as PostgreSQL
     participant L as LLM (OpenAI-compatible)
-    C->>A: POST /ask {question, top_k?, document_id?}
+    C->>A: POST /ask (question, top_k?, document_id?)
     A->>S: hybrid search (owner + completed filters in SQL)
     S->>D: semantic + keyword queries
     D-->>S: chunks with cosine similarity
@@ -26,7 +26,7 @@ sequenceDiagram
     alt timeout / HTTP error / malformed / not configured
         A-->>C: 503 service_unavailable
     end
-    L-->>A: JSON {status, answer with [n] markers, citations}
+    L-->>A: JSON with status, answer with [n] markers, citations
     A->>A: tolerant parse, keep only citations of sources actually sent
     A-->>C: 200 answer + citations
 ```
@@ -76,6 +76,9 @@ sequenceDiagram
    nothing), `parse_failed` (empty reply / refusal / no answer text), or
    `no_valid_citations` (an answer without any valid citation is treated as ungrounded
    and not shown).
+9. **Presentation**: after validation, `[n]` markers are stripped from the answer text
+   (`app/services/answer_format.py`). The response carries clean Markdown in `answer`
+   and the validated `citations` array; the web UI renders only the Markdown.
 
 ## Why every answer was "Not enough evidence" (fixed 2026-10-18)
 

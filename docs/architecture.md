@@ -35,16 +35,16 @@ for authenticated endpoints, counting both in
 
 ```mermaid
 flowchart LR
-    client[Client / Swagger UI] -->|HTTPS JSON + multipart| api[FastAPI API<br/>app/main.py]
+    client[Client / Swagger UI] -->|"HTTPS JSON + multipart"| api[FastAPI API<br/>app/main.py]
     api -->|SQLAlchemy sync, psycopg 3| pg[(PostgreSQL 16<br/>+ pgvector extension)]
     api -->|publish documents.process, rate limits, AUTH| redis[(Redis<br/>broker + rate limits, password)]
-    api -->|save / delete| storage[[Storage volume<br/>LocalStorage]]
+    api -->|"save / delete"| storage[[Storage volume<br/>LocalStorage]]
     worker[Celery worker + beat<br/>app/workers] -->|consume, AUTH| redis
-    worker -->|claim / update job, write chunks + vectors| pg
+    worker -->|"claim / update job, write chunks + vectors"| pg
     worker -->|read| storage
-    worker -->|embed passages| model[[bge-small-en-v1.5<br/>local, HF cache volume]]
+    worker -->|embed passages| model[[bge-small-en-v1.5<br/>ONNX, model cache volume]]
     api -->|embed queries| model
-    api -->|/ask only, HTTPS| llm[OpenAI-compatible<br/>chat completions]
+    api -->|"/ask only, HTTPS"| llm[OpenAI-compatible<br/>chat completions]
     migrate[migrate service<br/>alembic upgrade head] --> pg
 ```
 
@@ -61,7 +61,7 @@ flowchart LR
 | Storage | `app/storage/` | `StorageService` interface + `LocalStorage` with traversal guard. |
 | Workers | `app/workers/` | Celery app, task adapter, framework-free `DocumentProcessor`, pipeline steps. |
 | Core | `app/core/` | Settings, security (Argon2, JWT), JSON logging, request context, errors, middleware. |
-| AI providers | `app/ai/` | `LLMProvider` / `EmbeddingProvider` / `Reranker` protocols; local sentence-transformers embeddings, optional cross-encoder, OpenAI-compatible HTTP chat client; lazy, cached factories. (DIP1's OpenAI SDK adapters remain but are not wired.) |
+| AI providers | `app/ai/` | `LLMProvider` / `EmbeddingProvider` / `Reranker` protocols; local ONNX Runtime embeddings by default (sentence-transformers as an optional extra), optional cross-encoder, OpenAI-compatible HTTP chat client; lazy, cached factories. (DIP1's OpenAI SDK adapters remain but are not wired.) |
 | Processing | `app/processing/` | Framework-free extraction (PDF/DOCX/TXT), normalization and token-aware chunking. |
 
 ## Upload flow
@@ -86,12 +86,12 @@ sequenceDiagram
         A->>S: delete(key)
         A-->>C: 409
     end
-    A->>D: INSERT document (uploaded->queued), job (pending->queued, task_id), audit; COMMIT
+    A->>D: INSERT document (uploaded to queued), job (pending to queued, task_id), audit, COMMIT
     A->>R: publish documents.process(task_id)
     alt broker unavailable
-        A->>D: job failed, document failed (safe message); COMMIT
+        A->>D: job failed, document failed (safe message), COMMIT
     end
-    A-->>C: 201 {id, status, job_id, job_status}
+    A-->>C: 201 id, status, job_id, job_status
 ```
 
 ## Job flow
@@ -104,17 +104,17 @@ sequenceDiagram
     participant D as PostgreSQL
     participant S as Storage
     R->>W: documents.process(document_id, job_id, request_id)
-    W->>D: SELECT job FOR UPDATE; skip if missing/terminal
-    W->>D: job -> processing, attempts+1, started_at; document -> processing; COMMIT
+    W->>D: SELECT job FOR UPDATE, skip if missing/terminal
+    W->>D: job to processing, attempts+1, started_at, document to processing, COMMIT
     W->>S: integrity_check, extract (read file)
     W->>W: normalize, chunk, embed (no DB transaction open)
-    W->>D: index: lock document, DELETE + INSERT chunks; COMMIT
+    W->>D: index: lock document, DELETE + INSERT chunks, COMMIT
     alt success
-        W->>D: job completed, completed_at; document completed; COMMIT
+        W->>D: job completed, completed_at, document completed, COMMIT
     else permanent error
-        W->>D: job failed + safe error_message; document failed; COMMIT
+        W->>D: job failed + safe error_message, document failed, COMMIT
     else transient error, retries left
-        W->>D: job retrying; document queued; COMMIT
+        W->>D: job retrying, document queued, COMMIT
         W->>R: retry with exponential backoff
     end
 ```
@@ -226,22 +226,22 @@ HNSW `embedding vector_cosine_ops`.
 
 ```mermaid
 flowchart LR
-    q[POST /search or /ask] --> v[validate query, top_k]
+    q["POST /search or /ask"] --> v[validate query, top_k]
     v --> e[embed query<br/>bge-small + instruction]
-    v --> k[keyword: tsvector OR-query, ts_rank]
-    e --> s[semantic: pgvector cosine]
+    v --> k["keyword: tsvector OR-query, ts_rank"]
+    e --> s["semantic: pgvector cosine"]
     s & k --> f{mode}
     f -->|hybrid| r[RRF k=60, dedupe, tie-break by id]
-    f -->|semantic / keyword| o[single list]
+    f -->|"semantic / keyword"| o[single list]
     r --> rr[optional cross-encoder rerank]
     o --> rr
-    rr --> out[/search response]
+    rr --> out["/search response"]
     rr --> g{similarity >= threshold?}
     g -->|no| ie[insufficient evidence, no LLM call]
-    g -->|yes| c[context builder: dedupe, token budget]
-    c --> l[LLM: system rules + question + untrusted sources]
+    g -->|yes| c["context builder: dedupe, token budget"]
+    c --> l["LLM: system rules + question + untrusted sources"]
     l --> cv[citation validation against sent sources]
-    cv --> ans[/ask response]
+    cv --> ans["/ask response"]
 ```
 
 Both SQL queries filter by owner and `status = 'completed'` inside the statement.
@@ -345,10 +345,10 @@ Admins are created with `python -m app.cli create-admin --email ...` (password f
 
 ```mermaid
 flowchart LR
-    b[Browser] -->|HTML, /api/auth/*, /api/proxy/*| n[Next.js on Vercel]
-    n -->|server-side fetch, Bearer from HttpOnly cookie| c[Caddy :443]
-    b -->|POST /documents, upload-only token| c
-    c --> a[api: gunicorn x2 uvicorn workers]
+    b[Browser] -->|"HTML, /api/auth/*, /api/proxy/*"| n[Next.js on Vercel]
+    n -->|server-side fetch, Bearer from HttpOnly cookie| c["Caddy :443"]
+    b -->|"POST /documents, upload-only token"| c
+    c --> a["api: gunicorn x2 uvicorn workers"]
     a --> p[(postgres)]
     a --> r[(redis)]
     w[worker x2 processes] --> p

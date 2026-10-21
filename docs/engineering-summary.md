@@ -40,10 +40,11 @@ scoped to the document owner inside SQL.
 - Evidence threshold 0.48: on-topic minimum top-1 similarity 0.507, off-topic maximum
   0.451 on the same set.
   (DIP2 measurement, not repeated in the final phase.)
-- Tests (final, Linux, PostgreSQL 16.15 + pgvector 0.8.7, Redis 7.4 with password):
-  **364 passed, 0 skipped, 96% line coverage** of `app/`; the 129 database-backed tests
-  also pass on pgvector 0.6.2.
-- ruff and ruff format clean (170 files), mypy (strict) clean; actionlint clean;
+- Tests (2026-10-21, Linux, PostgreSQL 16 + pgvector, Redis with password): **553 passed,
+  11 skipped** (S3 tests without an S3 server); Playwright 22 passed on the production
+  compose stack. Earlier final-phase run: 364 passed, 96% line coverage of `app/`; the
+  129 database-backed tests also pass on pgvector 0.6.2.
+- ruff and ruff format clean, mypy (strict) clean (171 files on 2026-10-21); actionlint clean;
   `pip-audit`: no known vulnerabilities (torch skipped by the tool).
 - Docker: clean build 56 s, fresh-volume start ~40 s, smoke test 41/41 checks.
 - Sequential latency on one 8-vCPU VM (21 one-chunk documents): ingestion p50 131 ms,
