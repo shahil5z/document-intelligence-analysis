@@ -124,7 +124,7 @@ export function AskView() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">Ask AI</h1>
-          <p className="mt-1 text-sm text-muted">Answers come only from your files, with page sources.</p>
+          <p className="mt-1 text-sm text-muted">Answers are generated only from passages retrieved from your documents, with citations.</p>
         </div>
         {turns.length > 0 ? (
           <Button variant="ghost" size="sm" onClick={() => setTurns([])} disabled={busy}>
@@ -141,7 +141,7 @@ export function AskView() {
                 <path d="M8 10h8M8 14h5M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-6l-4 3v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <h2 className="mt-4 font-semibold text-fg">Ask about your files</h2>
+            <h2 className="mt-4 font-semibold text-fg">Ask about your documents</h2>
             <p className="mt-1 text-sm text-muted">
               {suggestions.generated
                 ? suggestions.source
@@ -242,7 +242,7 @@ function TypingIndicator() {
           <span key={delay} className="h-2 w-2 animate-bounce rounded-full bg-brand-500" style={{ animationDelay: `${delay}ms` }} />
         ))}
       </span>
-      Reading your files…
+      Retrieving passages…
     </div>
   );
 }

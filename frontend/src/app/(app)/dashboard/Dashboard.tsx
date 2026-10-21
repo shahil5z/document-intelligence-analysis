@@ -19,9 +19,9 @@ const COUNTERS = [
 ] as const;
 
 const SHORTCUTS = [
-  { href: "/upload", title: "Upload", body: "Add notes, papers or briefs.", icon: "M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" },
-  { href: "/search", title: "Search", body: "Find a topic in your files.", icon: "m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" },
-  { href: "/ask", title: "Ask AI", body: "Get answers with page sources.", icon: "M8 10h8M8 14h5M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-6l-4 3v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" },
+  { href: "/upload", title: "Upload", body: "Add PDF, DOCX or TXT files.", icon: "M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" },
+  { href: "/search", title: "Search", body: "Hybrid search across your documents.", icon: "m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" },
+  { href: "/ask", title: "Ask AI", body: "Cited answers from your documents.", icon: "M8 10h8M8 14h5M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-6l-4 3v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" },
 ];
 
 export function Dashboard() {
@@ -88,7 +88,7 @@ export function Dashboard() {
           ) : items.length === 0 && !error ? (
             <EmptyState
               title="No documents yet"
-              description="Upload lecture notes, a paper or an assignment brief to get started."
+              description="Upload a PDF, DOCX or TXT file to get started."
               action={<ButtonLink href="/upload">Upload your first document</ButtonLink>}
             />
           ) : (

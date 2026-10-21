@@ -56,7 +56,7 @@ export function SearchView() {
 
   return (
     <>
-      <PageHeader title="Search" description="Find a topic or term across your files." />
+      <PageHeader title="Search" description="Find passages by meaning, by exact terms, or both." />
       <Card className="p-4 sm:p-6">
         <form onSubmit={onSubmit} className="space-y-4">
           <Field id="query" label="Search query">
