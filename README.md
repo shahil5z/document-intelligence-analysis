@@ -1,4 +1,8 @@
-# Document Intelligence & Analysis
+<p align="center">
+  <img src="frontend/public/brand/mark.png" width="120" alt="Document Intelligence & Analysis logo">
+</p>
+
+<h1 align="center">Document Intelligence &amp; Analysis</h1>
 
 Upload a PDF, DOCX or TXT file, search it with hybrid vector and full-text retrieval, and
 ask questions that are answered only from the document, with each answer checked against
