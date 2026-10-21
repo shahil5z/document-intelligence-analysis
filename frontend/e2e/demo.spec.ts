@@ -52,21 +52,15 @@ test("upload one PDF: Uploading → Processing → Ready, then the Ask CTA", asy
   await expect(page).toHaveURL(new RegExp(`/ask\\?document=${documentId}$`));
 });
 
-test("three questions with cited answers, then the limit modal", async () => {
+test("three questions with clean answers, then the limit modal", async () => {
   await expect(page.getByTestId("starter-question")).toHaveCount(4);
   await askQuestion("How many days do customers have to return unused items?");
   const answer = page.getByTestId("answer").last();
-  await expect(answer).toContainText("According to the document");
+  await expect(answer).toContainText("The document states");
   await expect(answer).not.toContainText("99");
+  await expect(answer).not.toContainText("[1]");
   await expect(page.getByTestId("demo-banner")).toContainText("2 of 3 questions left");
-
-  // Clicking the [1] chip highlights and expands its source card.
-  await answer.getByRole("button", { name: "Citation 1" }).click();
-  const source = answer.getByTestId("citation").first();
-  await expect(source).toHaveAttribute("data-active", "true");
-  await expect(source.locator("blockquote")).toBeVisible();
-  await expect(source).toContainText("refund-policy.pdf");
-  await shot(page, "ask-citations-dark");
+  await shot(page, "ask-answer-dark");
 
   await page.getByTestId("starter-question").first().waitFor({ state: "detached" });
   await askQuestion("Summarize the refund policy.");
@@ -88,8 +82,8 @@ test("light theme renders the chat and the modal too", async () => {
   await page.getByTestId("demo-limit-modal").getByRole("button", { name: "Not now" }).click();
   await page.getByTestId("theme-toggle").first().click();
   await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
-  await page.getByTestId("answer").first().getByRole("button", { name: "Citation 1" }).click();
-  await shot(page, "ask-citations-light");
+  await expect(page.getByTestId("answer").first()).toBeVisible();
+  await shot(page, "ask-answer-light");
   await page.getByRole("button", { name: "Create free account" }).click();
   await expect(page.getByTestId("demo-limit-modal")).toBeVisible();
   await shot(page, "demo-limit-modal-light", false);
@@ -140,7 +134,7 @@ test("convert the demo into a free account; the document is kept", async () => {
   // Regular account: asking works again past the demo limit.
   await page.goto(`/ask?document=${documentId}`);
   await askQuestion("What is the refund window?");
-  await expect(page.getByTestId("answer").last()).toContainText("According to the document");
+  await expect(page.getByTestId("answer").last()).toContainText("The document states");
   // Expected API refusals (403/429) are logged by the browser as failed resources; nothing else.
   expect(errors.filter((e) => !/Failed to load resource: the server responded with a status of 40[39]/.test(e))).toEqual([]);
   await page.context().close();

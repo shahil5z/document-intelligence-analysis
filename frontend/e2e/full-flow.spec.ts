@@ -150,22 +150,32 @@ test("6: search shows real extracted text", async () => {
   await shot(page, "search");
 });
 
-test("7-8: ask shows an answer with citations (stub LLM)", async () => {
+test("7-8: ask shows a clean Markdown answer; citations stay in the API response (stub LLM)", async () => {
   const page = pageA;
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/ask");
   await page.getByLabel("Your question").fill("How many days do customers have to return unused items?");
+  const reply = page.waitForResponse((r) => r.url().includes("/api/proxy/ask") && r.request().method() === "POST");
   await page.getByRole("button", { name: "Ask", exact: true }).click();
+  const body = await (await reply).json();
+  // Grounding metadata is still returned by the API; the text itself has no markers.
+  expect(body.citations.length).toBeGreaterThan(0);
+  expect(body.citations[0].filename).toBe("refund-policy.pdf");
+  expect(body.answer).not.toMatch(/\[\d+\]/);
   const answer = page.getByTestId("answer");
-  // Structured stub reply (JSON schema output) built from the retrieved passages.
-  await expect(answer).toContainText("According to the document");
-  // The stub also cites [99], which was never sent; the API strips it.
-  await expect(answer).not.toContainText("99");
-  await expect(answer.getByRole("button", { name: "Citation 1" })).toBeVisible();
-  const citations = page.getByTestId("citation");
-  await expect(citations.first()).toContainText(/1\s*refund-policy\.pdf\s*pages? 1/);
-  await citations.first().getByText("Show cited passage").click();
-  await expect(citations.first()).toHaveAttribute("data-active", "true");
-  await expect(citations.first().locator("blockquote")).toContainText("30 days");
+  await expect(answer.getByRole("heading", { level: 2, name: "Answer" })).toBeVisible();
+  await expect(answer.getByRole("heading", { level: 4, name: "Summary" })).toBeVisible();
+  await expect(answer).toContainText("The document states");
+  await expect(answer).toContainText("30 days");
+  const text = await answer.innerText();
+  expect(text).not.toMatch(/\[\d+\]|Sources|retrieved passage|gpt-|Partial|Show cited passage/);
+  await expect(answer.getByTestId("citation")).toHaveCount(0);
+  await expect(page.getByTestId("question-bubble")).toContainText("return unused items");
+  await answer.getByTestId("copy-answer").click();
+  await expect(answer.getByTestId("copy-answer")).toHaveText("Copied");
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("The document states");
+  expect(copied).not.toMatch(/\[\d+\]|Sources/);
   await expect(page.getByText("AI answers can be wrong")).toBeVisible();
   await shot(page, "ask");
 });

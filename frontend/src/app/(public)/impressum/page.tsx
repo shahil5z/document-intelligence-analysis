@@ -31,7 +31,7 @@ export default function ImpressumPage() {
       <h2>Purpose of this website</h2>
       <p>
         {PRODUCT_NAME} is a non-commercial software project that demonstrates document
-        search and question answering with cited sources. <Placeholder>adjust if the site is
+        search and question answering grounded in the uploaded documents. <Placeholder>adjust if the site is
         operated commercially, and add company register / VAT details if applicable</Placeholder>
       </p>
       <h2>Basic direction (§ 25 Abs 4 MedienG)</h2>
@@ -39,7 +39,7 @@ export default function ImpressumPage() {
       <h2>Liability for content and links</h2>
       <p>
         The content was prepared with care, but no guarantee is given for completeness or
-        accuracy. AI-generated answers can be wrong; check the cited passages. External
+        accuracy. AI-generated answers can be wrong; verify important details in the source document. External
         links are the responsibility of their operators.
       </p>
       <h2>Online dispute resolution</h2>

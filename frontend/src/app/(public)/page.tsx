@@ -12,8 +12,8 @@ const CAPABILITIES = [
     body: "Each query runs a pgvector similarity search and a Postgres full-text search; the two ranked lists are merged with Reciprocal Rank Fusion.",
   },
   {
-    title: "Cited RAG answers",
-    body: "Retrieved passages are sent to the language model with numbered references. Citations that do not match a retrieved passage are removed.",
+    title: "Grounded RAG answers",
+    body: "Retrieved passages are sent to the language model with numbered references. The backend checks every reference against the passages it sent and withholds answers that cannot be tied to the document.",
   },
   {
     title: "Background processing",
@@ -25,7 +25,7 @@ const STEPS = [
   { n: "01", title: "Upload", body: "Add a PDF, DOCX or TXT file (up to 10 MB with an account). Processing runs in the background." },
   { n: "02", title: "Search", body: "Search across your documents by meaning, by exact terms, or both. Results show the passage and its page." },
   { n: "03", title: "Ask", body: "Ask a question in plain language. The answer is generated only from passages retrieved from your documents." },
-  { n: "04", title: "Verify", body: "Each claim carries a numbered citation. Open it to read the exact passage, file and page it came from." },
+  { n: "04", title: "Read", body: "The answer is shown as clean, formatted text. If the document does not cover the question, it says so instead of guessing." },
 ];
 
 const PIPELINE: { label: string; detail: string }[] = [
@@ -36,7 +36,7 @@ const PIPELINE: { label: string; detail: string }[] = [
   { label: "Hybrid retrieval", detail: "vector + keyword, Reciprocal Rank Fusion" },
   { label: "Passages", detail: "top passages with page and offsets" },
   { label: "LLM", detail: "OpenAI gpt-4o-mini, structured output" },
-  { label: "Cited answer", detail: "citations checked against retrieved passages" },
+  { label: "Grounded answer", detail: "citations validated, clean Markdown returned" },
 ];
 
 const STACK: { group: string; items: string[] }[] = [
@@ -61,8 +61,8 @@ const DECISIONS = [
     body: "The backend runs on a small 1 GB VM. Serving the embedding model with ONNX Runtime avoids a full deep-learning framework, and only the API process loads it; the worker sends chunks to an internal endpoint instead of holding a second copy.",
   },
   {
-    title: "Why citations",
-    body: "A generated answer is only useful if it can be checked. Every answer references numbered passages, references that do not match a retrieved passage are dropped, and an answer with no valid citation is withheld.",
+    title: "Why internal citations",
+    body: "A generated answer is only useful if it is grounded. The model must cite the passages it used; the backend drops references to passages it never sent and withholds an answer with no valid citation. Citations are kept in the API response, and the interface shows the clean answer.",
   },
 ];
 
@@ -85,47 +85,28 @@ function SectionHeading({ id, eyebrow, title, intro }: { id: string; eyebrow: st
   );
 }
 
-function Cite({ n }: { n: number }) {
-  return (
-    <span className="mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-brand-50 px-1 align-text-top text-[11px] font-semibold text-brand-700 ring-1 ring-inset ring-brand-200">
-      {n}
-    </span>
-  );
-}
-
 function ExampleAnswer() {
-  const sources = [
-    { n: 1, file: "annual-report-2025.pdf", page: "page 2", text: "The report finds that operating costs rose 8% year over year, driven mainly by energy and logistics…" },
-    { n: 2, file: "annual-report-2025.pdf", page: "pages 6-7", text: "We recommend consolidating regional warehouses and renegotiating long-term energy contracts…" },
-  ];
   return (
     <figure className="rounded-xl border border-border bg-surface p-5 sm:p-6" aria-labelledby="example-caption">
       <figcaption id="example-caption" className="flex items-center justify-between gap-3 text-xs text-subtle">
-        <span className="font-mono uppercase tracking-[0.14em]">Example answer</span>
+        <span className="font-mono uppercase tracking-[0.14em]">Example</span>
         <span>Illustrative content, not real output</span>
       </figcaption>
-      <p className="mt-5 text-sm font-medium text-fg">What are the main findings of this document?</p>
-      <p className="mt-3 text-[15px] leading-7 text-fg">
-        The document reports that operating costs increased year over year, mainly because of
-        energy and logistics expenses <Cite n={1} />. It recommends consolidating regional
-        warehouses and renegotiating energy contracts to reduce them <Cite n={2} />.
-      </p>
-      <div className="mt-5 border-t border-border pt-4">
-        <p className="mb-2 text-sm font-semibold text-fg">Sources</p>
-        <ol className="space-y-2">
-          {sources.map((s) => (
-            <li key={s.n} className="rounded-lg border border-border bg-surface-2 p-3">
-              <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-fg">
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-primary px-1 text-[11px] font-semibold text-white">
-                  {s.n}
-                </span>
-                <span className="text-link">{s.file}</span>
-                <span className="font-normal text-subtle">{s.page}</span>
-              </p>
-              <p className="mt-1.5 text-sm text-muted">{s.text}</p>
-            </li>
-          ))}
-        </ol>
+      <div className="mt-5 flex justify-end">
+        <p className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-white">
+          What are the main findings of this document?
+        </p>
+      </div>
+      <div className="mt-4 rounded-xl border border-border bg-background/40 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-subtle">Answer</p>
+        <p className="mt-2 text-[15px] leading-7 text-fg">
+          The document reports that operating costs rose year over year, mainly because of
+          energy and logistics expenses. It recommends two measures:
+        </p>
+        <ul className="mt-2 list-disc space-y-1 pl-6 text-[15px] leading-7 text-fg marker:text-subtle">
+          <li>Consolidate regional warehouses.</li>
+          <li>Renegotiate long-term energy contracts.</li>
+        </ul>
       </div>
     </figure>
   );
@@ -140,12 +121,12 @@ export default function LandingPage() {
           Document Intelligence &amp; Analysis
         </h1>
         <p className="mt-6 max-w-2xl text-lg leading-relaxed text-fg sm:text-xl">
-          Search, understand, and ask questions about your documents with cited AI answers.
+          Search, understand, and ask questions about your documents with grounded AI answers.
         </p>
         <p className="mt-4 max-w-2xl leading-relaxed text-muted">
           Documents are extracted and chunked in a background worker, embedded with an ONNX model,
           and indexed in Postgres with pgvector. Questions are answered with retrieval-augmented
-          generation over hybrid (vector + full-text) search, and every answer cites its sources.
+          generation over hybrid (vector + full-text) search, and every answer is checked against the passages it cites.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
           <DemoButton size="lg" variant="primary" label="Try the Demo" />
@@ -220,7 +201,7 @@ export default function LandingPage() {
             id="arch-heading"
             eyebrow="Architecture"
             title="Built as an AI retrieval system"
-            intro="The path from an uploaded file to a cited answer, as implemented in the backend."
+            intro="The path from an uploaded file to a grounded answer, as implemented in the backend."
           />
           <ol className="mt-10 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
             {PIPELINE.map((step, i) => (
@@ -292,7 +273,7 @@ export default function LandingPage() {
           <div>
             <SectionHeading id="limits-heading" eyebrow="Limitations" title="What to keep in mind" />
             <ul className="mt-6 space-y-3 text-sm leading-relaxed text-muted">
-              <li className="flex gap-3"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-subtle" aria-hidden="true" /><span>Answers are generated by a language model and can be wrong or incomplete. Check the cited passages.</span></li>
+              <li className="flex gap-3"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-subtle" aria-hidden="true" /><span>Answers are generated by a language model and can be wrong or incomplete. Verify important details in the document.</span></li>
               <li className="flex gap-3"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-subtle" aria-hidden="true" /><span>Extraction quality depends on the document. Scanned PDFs without a text layer are not supported (there is no OCR), and complex tables or multi-column layouts may be extracted imperfectly.</span></li>
               <li className="flex gap-3"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-subtle" aria-hidden="true" /><span>The embedding model is English-focused, so semantic search works best on English text.</span></li>
             </ul>
@@ -307,7 +288,7 @@ export default function LandingPage() {
           <p className="mt-6 max-w-3xl leading-relaxed text-muted">
             Document Intelligence &amp; Analysis explores the engineering behind a retrieval-augmented
             generation system end to end: reliable text extraction with page provenance, combining
-            dense and lexical retrieval, keeping generated answers grounded in verifiable citations,
+            dense and lexical retrieval, keeping generated answers grounded in validated citations,
             and running asynchronous document processing with an embedding model on a single small
             cloud VM. The backend exposes a REST API with per-account isolation, rate
             limiting and an automated test suite; the frontend is a Next.js application that keeps

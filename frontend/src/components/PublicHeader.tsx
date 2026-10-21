@@ -73,7 +73,7 @@ export function PublicFooter() {
         <div className="max-w-md">
           <Wordmark compact />
           <p className="mt-3 text-muted">
-            AI answers can be wrong. Check the cited passages before relying on an answer.
+            AI answers can be wrong. Verify important details in the document before relying on an answer.
           </p>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2">

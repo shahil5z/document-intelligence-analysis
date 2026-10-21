@@ -1,80 +1,53 @@
-import { Fragment, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 /**
- * A deliberately small Markdown subset rendered as React elements (never HTML strings, so
- * model output cannot inject markup): paragraphs, "-"/"*"/"1." lists, ### headings,
- * **bold**, *italic*, `code`, and [n] citation markers turned into chips via `renderCitation`.
+ * Safe Markdown for AI answers: react-markdown builds a React tree from the Markdown AST,
+ * raw HTML is never rendered (no rehype-raw, skipHtml), and unsafe URLs are dropped by the
+ * default urlTransform. Answer headings start at h3: they sit under the page h1 and each answer's h2.
  */
-export type CitationRenderer = (number: number, key: string) => ReactNode;
+const components: Components = {
+  h1: ({ children }) => <h3 className="mb-2 mt-5 text-lg font-semibold text-fg first:mt-0">{children}</h3>,
+  h2: ({ children }) => <h3 className="mb-2 mt-5 text-lg font-semibold text-fg first:mt-0">{children}</h3>,
+  h3: ({ children }) => <h4 className="mb-2 mt-4 text-base font-semibold text-fg first:mt-0">{children}</h4>,
+  h4: ({ children }) => <h5 className="mb-1.5 mt-4 font-semibold text-fg first:mt-0">{children}</h5>,
+  h5: ({ children }) => <h5 className="mb-1.5 mt-4 font-semibold text-fg first:mt-0">{children}</h5>,
+  h6: ({ children }) => <h5 className="mb-1.5 mt-4 font-semibold text-fg first:mt-0">{children}</h5>,
+  p: ({ children }) => <p className="my-3 first:mt-0 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="my-3 list-disc space-y-1.5 pl-6 marker:text-subtle first:mt-0 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="my-3 list-decimal space-y-1.5 pl-6 marker:text-subtle first:mt-0 last:mb-0">{children}</ol>,
+  li: ({ children }) => <li className="pl-1">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold text-fg">{children}</strong>,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer nofollow" className="text-link underline underline-offset-2 hover:no-underline">
+      {children}
+    </a>
+  ),
+  blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-brand-400 pl-4 text-muted">{children}</blockquote>,
+  hr: () => <hr className="my-5 border-border" />,
+  pre: ({ children }) => (
+    <pre className="my-3 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3 font-mono text-[13px] leading-6 [&>code]:bg-transparent [&>code]:p-0">
+      {children}
+    </pre>
+  ),
+  code: ({ children }) => <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[0.875em]">{children}</code>,
+  table: ({ children }) => (
+    <div className="my-3 max-w-full overflow-x-auto rounded-lg border border-border" tabIndex={0} role="region" aria-label="Table">
+      <table className="w-full border-collapse text-left text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-surface-2">{children}</thead>,
+  th: ({ children }) => <th className="whitespace-nowrap border-b border-border px-3 py-2 font-semibold text-fg">{children}</th>,
+  td: ({ children }) => <td className="border-b border-border px-3 py-2 align-top [tr:last-child>&]:border-b-0">{children}</td>,
+  img: ({ alt }) => <span className="text-muted">{alt}</span>,
+};
 
-const INLINE = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\*[^*\s][^*\n]*\*|_[^_\s][^_\n]*_|\[\d{1,3}\])/g;
-
-function inline(text: string, renderCitation: CitationRenderer, keyPrefix: string): ReactNode[] {
-  return text.split(INLINE).map((part, index) => {
-    const key = `${keyPrefix}-${index}`;
-    if (!part) return null;
-    const citation = /^\[(\d{1,3})\]$/.exec(part);
-    if (citation) return renderCitation(Number(citation[1]), key);
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4)
-      return <strong key={key}>{part.slice(2, -2)}</strong>;
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 2)
-      return <code key={key}>{part.slice(1, -1)}</code>;
-    if ((part.startsWith("*") && part.endsWith("*")) || (part.startsWith("_") && part.endsWith("_")))
-      if (part.length > 2) return <em key={key}>{part.slice(1, -1)}</em>;
-    return <Fragment key={key}>{part}</Fragment>;
-  });
-}
-
-type Block =
-  | { kind: "p"; lines: string[] }
-  | { kind: "ul" | "ol"; items: string[] }
-  | { kind: "h"; text: string };
-
-function toBlocks(source: string): Block[] {
-  const blocks: Block[] = [];
-  for (const raw of source.replace(/\r\n?/g, "\n").split("\n")) {
-    const line = raw.trimEnd();
-    const last = blocks.at(-1);
-    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
-    const ordered = /^\s*\d{1,3}[.)]\s+(.*)$/.exec(line);
-    const heading = /^\s*#{1,6}\s+(.*)$/.exec(line);
-    if (!line.trim()) {
-      blocks.push({ kind: "p", lines: [] });
-    } else if (heading) {
-      blocks.push({ kind: "h", text: heading[1] });
-    } else if (bullet || ordered) {
-      const kind = bullet ? "ul" : "ol";
-      const text = (bullet ?? ordered)![1];
-      if (last && last.kind === kind) last.items.push(text);
-      else blocks.push({ kind, items: [text] });
-    } else if (last && last.kind === "p") {
-      last.lines.push(line.trim());
-    } else if (last && (last.kind === "ul" || last.kind === "ol") && /^\s{2,}/.test(raw)) {
-      last.items[last.items.length - 1] += ` ${line.trim()}`;
-    } else {
-      blocks.push({ kind: "p", lines: [line.trim()] });
-    }
-  }
-  return blocks.filter((block) => block.kind !== "p" || block.lines.length > 0);
-}
-
-export function Markdown({ source, renderCitation }: { source: string; renderCitation: CitationRenderer }) {
+export function Markdown({ source }: { source: string }) {
   return (
-    <div className="prose-answer">
-      {toBlocks(source).map((block, index) => {
-        const key = `b${index}`;
-        if (block.kind === "h")
-          return (
-            <p key={key} className="font-semibold text-fg">
-              {inline(block.text, renderCitation, key)}
-            </p>
-          );
-        if (block.kind === "p") return <p key={key}>{inline(block.lines.join(" "), renderCitation, key)}</p>;
-        const items = block.items.map((item, i) => (
-          <li key={`${key}-${i}`}>{inline(item, renderCitation, `${key}-${i}`)}</li>
-        ));
-        return block.kind === "ol" ? <ol key={key}>{items}</ol> : <ul key={key}>{items}</ul>;
-      })}
+    <div className="min-w-0 break-words text-[15px] leading-7 text-fg [overflow-wrap:anywhere]" data-testid="answer-markdown">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={components}>
+        {source}
+      </ReactMarkdown>
     </div>
   );
 }
