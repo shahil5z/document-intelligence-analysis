@@ -106,9 +106,10 @@ misread a passage it correctly cites.
 
 **04. Answer formats.** Questions about a World War history PDF: a summary comes back as a paragraph with key dates in bold, and asking for points returns battles and dates as a bulleted list.
 
-<img src="docs/screenshots/ask-ww2-paragraph-answer.png" width="720" alt="Ask AI answer summarising a World War history PDF in a paragraph">
-
-<img src="docs/screenshots/ask-ww2-bullet-answer.png" width="720" alt="Answer listing key World War battles and dates as bullet points">
+<p align="center">
+  <img src="docs/screenshots/ask-ww2-paragraph-answer.png" width="400" alt="Ask AI answer summarising a World War history PDF in a paragraph">
+  <img src="docs/screenshots/ask-ww2-bullet-answer.png" width="400" alt="Answer listing key World War battles and dates as bullet points">
+</p>
 
 ## Architecture
 
