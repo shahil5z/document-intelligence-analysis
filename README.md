@@ -217,8 +217,9 @@ Backend and frontend checks were rerun on 2026-10-21 at this commit's code. See
 
 ## Author
 
-Shohrab Haque Shahil designed and built this system, from the retrieval backend to the
-deployment.
+Designed and developed by **Shohrab Haque Shahil**
+
+[LinkedIn](https://www.linkedin.com/in/shohrab-haque) | [Website](https://shahil-personal.vercel.app)
 
 ## License
 
