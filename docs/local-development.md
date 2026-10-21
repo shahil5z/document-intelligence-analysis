@@ -16,7 +16,7 @@ are written for Windows but were **not executed on Windows** (NOT VERIFIED there
 ## 1. Backend
 
 ```powershell
-git clone <repo-url> dip; cd dip; git checkout final
+git clone https://github.com/shahil5z/document-intelligence-analysis.git dip; cd dip
 py -3.12 scripts\generate_env.py              # new .env with random secrets (names printed, never values)
 # existing .env from an earlier stage:  py -3.12 scripts\generate_env.py --merge --dry-run ; then --merge
 docker compose up --build -d

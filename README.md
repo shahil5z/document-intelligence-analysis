@@ -1,222 +1,224 @@
 # Document Intelligence & Analysis
 
-A retrieval-augmented question answering system for your own documents. Upload a PDF,
-DOCX or TXT file, search it with hybrid vector and full-text retrieval, and ask questions
-that are answered only from the document, with every answer checked against the passages
-it was generated from.
+Upload a PDF, DOCX or TXT file, search it with hybrid vector and full-text retrieval, and
+ask questions that are answered only from the document, with each answer checked against
+the passages it was generated from.
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 
-**Live demo:** https://doc-intelligence-shahil.vercel.app
-**Repository:** https://github.com/shahil5z/document-intelligence-analysis
+<p align="center">
+  <img src="docs/screenshots/live-ask.png" width="860" alt="Ask AI: two questions about an uploaded GPU report, answered as formatted Markdown">
+</p>
 
-The demo needs no sign-up: "Try the Demo" creates a temporary, isolated account limited
-to 1 PDF of up to 5 MB and 3 questions, deleted after 24 hours. You can also register
-with any e-mail address. The backend runs on a single free-tier VM, so the first request
-after a quiet period can be slow.
+<p align="center">
+  <a href="https://doc-intelligence-shahil.vercel.app">Live Demo</a> |
+  <a href="#documentation">Documentation</a> |
+  <a href="docs/architecture.md">Architecture</a> |
+  <a href="docs/retrieval.md">Retrieval</a>
+</p>
 
-![Ask AI: questions and formatted answers about an uploaded PDF](docs/screenshots/live-ask.png)
+The live demo needs no sign-up. "Try the Demo" creates a temporary account limited to
+one PDF of up to 5 MB and three questions; it is deleted after 24 hours.
 
-## What it does
+## What it is
 
-- Accepts PDF, DOCX and TXT uploads (up to 10 MB) and processes them in a background worker.
-- Extracts text page by page, splits it into token-aware chunks and embeds each chunk.
-- Searches across your documents by meaning, by exact terms, or both.
-- Answers questions in formatted Markdown, using only passages retrieved from your documents.
-- Says plainly when a document does not contain the answer instead of guessing.
+A full-stack retrieval-augmented generation (RAG) system: a FastAPI backend with a
+Celery worker, PostgreSQL with pgvector, and a Next.js frontend.
 
-## Why it is interesting
+## Why it matters
 
-- **Hybrid retrieval.** Every query runs a pgvector cosine search (HNSW index) and a
-  PostgreSQL full-text search (GIN index) and merges the two rankings with Reciprocal
-  Rank Fusion, so paraphrases and exact names or numbers are both found without
-  calibrating two score scales.
-- **Grounded answers with citation validation.** The model must cite the numbered
-  passages it used. The backend keeps only citations that refer to passages it actually
-  sent, withholds any answer without a valid citation, and skips the model call entirely
-  when no passage clears a similarity threshold. Citations are returned in the API
-  response; the interface shows the clean answer.
-- **One embedding model in memory.** `bge-small-en-v1.5` runs on ONNX Runtime inside the
-  API process only. The Celery worker sends chunks to a private `/internal/embed`
-  endpoint instead of loading a second copy, which keeps the stack inside 1 GB of RAM.
-- **Asynchronous processing.** Uploads return immediately; a Celery worker runs
-  extraction, chunking and embedding with an explicit job state machine, bounded retries
-  and a scheduled task that re-queues stalled jobs.
-- **Isolation and hardening.** Every repository query filters by owner in SQL (other
-  users' documents return 404), uploads are checked by extension, MIME type, magic bytes
-  and size, and `/internal/*`, `/metrics` and the OpenAPI docs are not reachable publicly.
+General chat models answer from what they were trained on. This system answers from the
+file you uploaded, and replies that it could not find enough information instead of
+guessing when the file does not support an answer.
 
-## Key features
+## What is technically interesting
 
-- Upload with live status: queued, processing, completed or failed.
-- Hybrid, semantic and keyword search with page numbers for each passage.
-- Ask AI: question bubbles and rendered Markdown answers (lists, tables, code) with a Copy button.
-- Clean "not enough information" replies for questions the document does not cover.
-- Suggested questions generated once per document after processing.
-- Temporary demo accounts with server-side limits.
-- Session token kept in an HttpOnly cookie by the Next.js server; never visible to page scripts.
-- Light and dark themes, mobile layout.
+Retrieval combines two independent rankings, every answer has to cite the passages it
+used, and those citations are checked on the server before anything reaches the user.
+The whole stack runs on a single 1 GB VM.
+
+## Retrieval pipeline
+
+```mermaid
+flowchart TD
+    Q[Question] --> E[Embed question<br/>bge-small-en-v1.5, ONNX]
+    E --> V[Vector search<br/>pgvector HNSW, cosine]
+    Q --> K[Full-text search<br/>tsvector, GIN]
+    V --> F[Reciprocal Rank Fusion, k = 60]
+    K --> F
+    F --> G{Best similarity<br/>above the gate?}
+    G -- no --> N[Not enough information<br/>no model call]
+    G -- yes --> L[gpt-4o-mini with numbered passages<br/>structured JSON output]
+    L --> C{At least one valid<br/>citation?}
+    C -- no --> W[Answer withheld]
+    C -- yes --> S[Strip markers, return Markdown<br/>plus citation metadata]
+```
+
+**Why hybrid retrieval?** Vector search finds paraphrases but can miss exact names,
+model numbers and figures; full-text search finds those but misses rewording. Each query
+runs both over the user's completed documents, and Reciprocal Rank Fusion merges the
+two lists by rank (`1 / (60 + rank)`), so the different score scales never have to be
+calibrated against each other.
+
+**Citation grounding.** Retrieved passages are sent to the model as numbered, untrusted
+sources, and the model must cite the numbers it relied on.
+
+- Citations that do not refer to a passage actually sent are removed.
+- An answer with no valid citation is withheld.
+- If the best passage is below the similarity gate (0.48 by default, 0.20 when the
+  question is scoped to one document or asks about the document as a whole), the API
+  returns "not enough information" without calling the model. The model can also
+  decline on its own when the passages do not answer the question.
+- After validation the markers are stripped from the text. The interface shows clean
+  Markdown; the API response still carries the citations (document, page, passage).
+
+This reduces unsupported answers but does not eliminate them: the model can still
+misread a passage it correctly cites.
+
+## Technical highlights
+
+| Area | Detail |
+| --- | --- |
+| Retrieval | pgvector HNSW and PostgreSQL GIN full-text indexes fused with Reciprocal Rank Fusion |
+| Evidence | Similarity gate before the model call, server-side citation validation, withholding without a valid citation |
+| Inference | `bge-small-en-v1.5` (384 dimensions) on ONNX Runtime, loaded once in the API; the worker embeds through it |
+| Processing | Token-based chunks (400 tokens, 60 overlap) built from whole sentences; Celery jobs with explicit states and bounded retries (3 by default, exponential backoff) |
+| Security | Argon2id passwords, HttpOnly session cookie through a Next.js BFF, owner filtering in every query |
+| Deployment | Next.js on Vercel; API, worker, PostgreSQL, Redis and Caddy in Docker Compose on one VM |
 
 ## Product tour
 
-| | |
-| --- | --- |
-| ![Landing page](docs/screenshots/live-landing.png) | ![Hybrid search results](docs/screenshots/live-search.png) |
-| The landing page explains the pipeline and starts a demo session. | Hybrid search highlights matching terms and shows the page of each passage. |
-| ![Document page](docs/screenshots/live-document.png) | ![Mobile layout](docs/screenshots/live-mobile.png) |
-| Each document shows its status, metadata and suggested questions. | The same app on a 390 px wide phone screen. |
+**01. Landing page.** Explains the pipeline and starts a demo session without sign-up.
+
+<img src="docs/screenshots/live-landing.png" width="720" alt="Landing page">
+
+**02. Document page.** Shows processing status, metadata and questions suggested from the file.
+
+<img src="docs/screenshots/live-document.png" width="720" alt="Document page for GPU.pdf">
+
+**03. Hybrid search.** Highlights matching terms and shows the page and similarity of each passage.
+
+<img src="docs/screenshots/live-search.png" width="720" alt="Hybrid search results for power consumption">
+
+**04. Mobile.** The same app on a 390 px wide screen.
+
+<img src="docs/screenshots/live-mobile.png" width="300" alt="Mobile layout">
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    browser[Browser] --> web["Next.js on Vercel<br/>pages + BFF"]
-    web -->|"JWT from HttpOnly cookie"| caddy
-    browser -->|"direct upload, short-lived token"| caddy
-    subgraph vm["Single VM, Docker Compose"]
-        caddy["Caddy, HTTPS"] --> api["FastAPI<br/>ONNX embeddings"]
-        api --> pg[("PostgreSQL 16<br/>pgvector")]
-        api --> redis[("Redis")]
-        redis --> worker["Celery worker + beat"]
-        worker -->|"/internal/embed"| api
-        worker --> pg
+    B[Browser] --> W[Next.js on Vercel<br/>pages and BFF]
+    W --> C[Caddy, HTTPS]
+    B -- direct upload --> C
+    subgraph VM[Single VM, Docker Compose]
+        C --> A[FastAPI + ONNX embeddings]
+        A --> P[(PostgreSQL 16 + pgvector)]
+        A --> R[(Redis)]
+        R --> K[Celery worker + beat]
+        K -- embed requests --> A
+        K --> P
     end
-    api -->|"question + passages"| llm["OpenAI gpt-4o-mini"]
-    worker -->|"suggested questions"| llm
+    A --> O[OpenAI gpt-4o-mini]
+    K --> O
 ```
 
-## Retrieval and answer pipeline
-
-1. The worker extracts text (pypdf, python-docx, plain text) with page numbers and
-   normalises it.
-2. Text is split into chunks of about 400 tokens with 60 tokens of overlap, keeping
-   page and character offsets.
-3. Each chunk is embedded (384 dimensions) and stored with a `vector` column (HNSW) and
-   a generated `tsvector` column (GIN).
-4. A question is embedded by the API; vector and full-text searches run over the user's
-   completed documents only, and their rankings are fused with Reciprocal Rank Fusion.
-5. If the best passage is below the similarity threshold, the API returns "not enough
-   information" without calling the model.
-6. Otherwise the passages are sent as numbered, untrusted sources with a structured-output
-   schema; the model answers in Markdown and cites passage numbers.
-7. The backend validates the cited numbers against the passages it sent, drops invalid
-   ones, and withholds answers with no valid citation.
-8. Citation markers are stripped from the answer text, and the clean Markdown is returned
-   together with the citation metadata. The interface renders the Markdown only.
+The browser talks to the Next.js server, which keeps the session token in an HttpOnly
+cookie and forwards requests to the API with it; only file uploads go directly to the
+API, with a short-lived upload token. The API stores the file, records a job and queues
+it in Redis. The Celery worker extracts text, chunks it, gets embeddings from the API
+and writes chunks with their vectors to PostgreSQL, then generates suggested questions.
+Search and ask run synchronously in the API. Details:
+[docs/architecture.md](docs/architecture.md).
 
 ## Tech stack
 
-| Area | Technologies |
+| Layer | Technologies |
 | --- | --- |
-| Backend | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2, Alembic, gunicorn/uvicorn |
-| Data and retrieval | PostgreSQL 16, pgvector, PostgreSQL full-text search, Redis 7 |
+| Backend | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2, Alembic |
+| Data | PostgreSQL 16, pgvector, PostgreSQL full-text search, Redis |
 | AI | ONNX Runtime, BAAI bge-small-en-v1.5, OpenAI gpt-4o-mini |
-| Jobs | Celery 5 with beat |
+| Jobs | Celery with beat |
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 4, react-markdown |
-| Infrastructure | Docker Compose, Caddy, Oracle Cloud VM, Vercel |
-| Quality | pytest, ruff, mypy, ESLint, Playwright |
+| Infrastructure | Docker Compose, Caddy, Vercel |
 
 ## Local development
 
-Requirements: Docker with Compose, Python 3.12, Node.js 20.9+ and npm.
+Requirements: Docker with Compose, Python 3.12, Node.js 20.9 or newer.
 
 ```bash
-git clone https://github.com/shahil5z/document-intelligence-analysis.git
-cd document-intelligence-analysis
-python3 scripts/generate_env.py          # writes .env with random secrets
-docker compose up --build -d             # postgres, redis, migrate, api, worker
+python3 scripts/generate_env.py            # writes .env with random secrets
+docker compose up --build -d
 curl -s http://localhost:8000/health/ready
 
-cd frontend
-cp .env.example .env.local
-npm ci
-npm run dev                              # http://localhost:3000
+cd frontend && cp .env.example .env.local && npm ci && npm run dev   # http://localhost:3000
 ```
 
-Without an OpenAI key everything except answers and suggested questions works; add
-`-f docker-compose.stub-llm.yml` to use a local stub model. More detail:
+Without an OpenAI key everything except answers works. For key-free answers, add
+`-f docker-compose.yml -f docker-compose.stub-llm.yml` and set `OPENAI_API_KEY` to any
+non-placeholder string. Full guide, Windows commands and checks:
 [docs/local-development.md](docs/local-development.md).
-
-## Configuration
-
-Settings are read from environment variables. Templates with comments:
-[.env.example](.env.example), [.env.production.example](.env.production.example) and
-[frontend/.env.example](frontend/.env.example). The main variables are
-`JWT_SECRET_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `INTERNAL_EMBED_SECRET`,
-`OPENAI_API_KEY` and `CORS_ALLOWED_ORIGINS` for the backend, and `NEXT_PUBLIC_API_URL`
-and `DIP_CLIENT_IP_SECRET` (server-only) for the frontend. See
-[docs/configuration.md](docs/configuration.md).
 
 ## Security
 
-- Passwords hashed with Argon2id; short-lived HS256 JWTs (30 minutes).
+- Argon2id password hashing; JWTs expire after 30 minutes.
 - The JWT lives in an HttpOnly, Secure, SameSite=Lax cookie set by the Next.js server;
-  state-changing BFF calls require a CSRF header and a matching Origin.
-- Owner filtering inside every SQL query; foreign document IDs return 404.
-- Upload validation by extension, MIME type, magic bytes and streamed size limit.
-- Redis-backed rate limits on registration, login, upload, search, ask and demo creation.
-- Security headers (nosniff, frame denial, no-referrer, HSTS in production).
-- Retrieved text is passed to the model as untrusted data; logs never contain document
-  text, questions or answers.
-- Caddy returns 404 for `/internal/*` and `/metrics`; API docs are disabled in production.
-  Postgres and Redis are not exposed.
+  state-changing requests need a CSRF header and a matching Origin.
+- Every document query filters by owner; another user's document returns 404.
+- Uploads are checked by extension, MIME type, magic bytes and a streamed size limit.
+- Redis-backed rate limits on login, registration, upload, search, ask and demo creation.
+- Retrieved text is treated as untrusted input; logs contain no document text, questions
+  or answers.
+- Internal endpoints, metrics and API docs are not publicly reachable.
 
 Details: [docs/security.md](docs/security.md).
 
 ## Testing
 
-Run on 2026-10-21:
+| Check | Result |
+| --- | --- |
+| Backend `pytest` | 553 passed, 11 skipped (S3 tests need an S3 server) |
+| `ruff check`, `ruff format --check`, `mypy` | Clean (mypy: 171 source files) |
+| Frontend lint, typecheck, build | Pass |
+| Playwright on the production compose stack with the stub model | 22 of 22 passed (run at `ab6004d`; unchanged since) |
 
-- Backend: `uv run pytest`: 553 passed, 11 skipped (S3 tests without an S3 server);
-  `ruff check` and `mypy` pass.
-- Frontend: `npm run lint`, `npm run typecheck` and `npm run build` pass.
-- End to end: `scripts/e2e_prod_local.sh` (production compose stack, local HTTPS, stub
-  model, Playwright): 22 of 22 passed.
-
-See [docs/testing.md](docs/testing.md).
-
-## Deployment
-
-- **Frontend:** Vercel project with root directory `frontend/`; pushes to `main` deploy
-  to production.
-- **Backend:** one Oracle Cloud VM (1 GB RAM plus swap) running `docker-compose.prod.yml`
-  with the `docker-compose.micro.yml` override: Caddy, API, Celery worker with embedded
-  beat, PostgreSQL and Redis. Only SSH and HTTP(S) ports are open.
-
-Guides: [docs/vercel-deployment.md](docs/vercel-deployment.md),
-[docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md),
-[docs/deployment-checklist.md](docs/deployment-checklist.md).
+Backend and frontend checks were rerun on 2026-10-21 at this commit's code. See
+[docs/testing.md](docs/testing.md).
 
 ## Limitations
 
-- Answers come from a language model and can be wrong or incomplete; verify important
-  details in the document. Meta-questions such as "what is not covered" are answered
-  from retrieved excerpts and are less reliable.
-- No OCR: scanned PDFs without a text layer fail, and complex tables or multi-column
-  layouts may be extracted imperfectly.
+- Answers can still be wrong or incomplete; verify important details in the document.
+  Questions about what a document does *not* cover are answered from a few retrieved
+  passages and are less reliable.
+- No OCR: scanned PDFs without a text layer fail, and complex layouts may extract poorly.
 - The embedding model is English-focused.
-- Single VM with local storage and no failover; the first request after a restart is slow.
-- Each question is answered independently; follow-ups do not use earlier turns as context.
+- One VM with local storage and no failover.
+- Each question is answered on its own; earlier turns are not used as context.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
-- [Document processing](docs/document-processing.md)
-- [Retrieval](docs/retrieval.md) and [RAG](docs/rag.md)
-- [Demo mode](docs/demo-mode.md)
-- [Security](docs/security.md)
-- [Architecture decision records](docs/adr/)
+| Document | Covers |
+| --- | --- |
+| [architecture.md](docs/architecture.md) | Components, flows, state machines, data model |
+| [document-processing.md](docs/document-processing.md) | Extraction, normalisation, chunking |
+| [retrieval.md](docs/retrieval.md) | Vector, full-text and hybrid search |
+| [rag.md](docs/rag.md) | Prompting, evidence gate, citation validation |
+| [demo-mode.md](docs/demo-mode.md) | Temporary demo accounts and limits |
+| [security.md](docs/security.md) | Threat model and controls |
+| [configuration.md](docs/configuration.md) | Environment variables |
+| [local-development.md](docs/local-development.md) | Running locally |
+| [testing.md](docs/testing.md) | Test layout, commands, results |
+| [production-deployment.md](docs/production-deployment.md) | Production stack, with [Oracle Cloud](docs/oracle-cloud-deployment.md) and [Vercel](docs/vercel-deployment.md) guides |
+| [adr/](docs/adr/) | Architecture decision records |
 
 ## Author
 
-Shohrab Haque Shahil. Designed and built this system end to end, from the retrieval
-backend to the deployment.
+Shohrab Haque Shahil designed and built this system, from the retrieval backend to the
+deployment.
 
 ## License
 

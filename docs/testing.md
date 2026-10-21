@@ -62,6 +62,7 @@ Manual checklist for Windows: [manual-testing.md](manual-testing.md).
 | **`final` after the final-phase changes** | same, plus Redis 7.4.11 with password (`TEST_REDIS_URL`) | **364 passed, 0 skipped, 96% coverage** (3370 statements, 148 missed), 57.7 s |
 | **`main` after the ONNX merge** (2026-10-20) | Linux box, Python 3.12.15, PostgreSQL 16 + pgvector, Redis 7 with password, no S3 server | **512 passed, 11 skipped (S3), 96% coverage** (4320 statements, 185 missed), 74.5 s |
 | `main` before the Vercel release (2026-10-20) | same | 512 passed, 11 skipped (S3); ruff, mypy, `alembic check` clean; Playwright 21 passed (production compose stack + stub LLM); live e2e against Vercel passed (one real `/ask`) |
+| `main` after the answer redesign (2026-10-21) | same | 553 passed, 11 skipped (S3); ruff, ruff format, mypy (171 files) clean; frontend lint, typecheck, build pass; Playwright 22 passed at `ab6004d` |
 | `main` with suggested questions (2026-10-20) | same | 533 passed, 11 skipped (S3); ruff, mypy, `alembic check` and 0004 downgrade/upgrade clean; Playwright 22 passed (stub LLM, suggestions mocked in the browser) |
 | DB-backed tests against pgvector 0.6.2 (fallback path) | PostgreSQL 16 + pgvector 0.6.2 | see [verification report](history/final-project-report.md#7-verification-results) |
 | DIP3, historical | Windows 11, PostgreSQL 16.2 + pgvector 0.6.2 | 330 passed, 3 skipped, 95% coverage (not repeated) |
