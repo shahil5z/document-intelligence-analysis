@@ -149,7 +149,8 @@ Search and ask run synchronously in the API. Details:
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 4, react-markdown |
 | Infrastructure | Docker Compose, Caddy, Vercel |
 
-## Local development
+<details>
+<summary><h2>Local development</h2></summary>
 
 Requirements: Docker with Compose, Python 3.12, Node.js 20.9 or newer.
 
@@ -166,7 +167,10 @@ Without an OpenAI key everything except answers works. For key-free answers, add
 non-placeholder string. Full guide, Windows commands and checks:
 [docs/local-development.md](docs/local-development.md).
 
-## Security
+</details>
+
+<details>
+<summary><h2>Security</h2></summary>
 
 - Argon2id password hashing; JWTs expire after 30 minutes.
 - The JWT lives in an HttpOnly, Secure, SameSite=Lax cookie set by the Next.js server;
@@ -180,7 +184,10 @@ non-placeholder string. Full guide, Windows commands and checks:
 
 Details: [docs/security.md](docs/security.md).
 
-## Limitations
+</details>
+
+<details>
+<summary><h2>Limitations</h2></summary>
 
 - Answers can still be wrong or incomplete; verify important details in the document.
   Questions about what a document does *not* cover are answered from a few retrieved
@@ -189,6 +196,8 @@ Details: [docs/security.md](docs/security.md).
 - The embedding model is English-focused.
 - One VM with local storage and no failover.
 - Each question is answered on its own; earlier turns are not used as context.
+
+</details>
 
 ## Documentation
 
