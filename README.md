@@ -14,9 +14,6 @@ the passages it was generated from.
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 
-<p align="center">
-  <img src="docs/screenshots/live-ask.png" width="860" alt="Ask AI: two questions about an uploaded GPU report, answered as formatted Markdown">
-</p>
 
 <p align="center">
   <a href="https://doc-intelligence-shahil.vercel.app">Live Demo</a> |
@@ -182,18 +179,6 @@ non-placeholder string. Full guide, Windows commands and checks:
 - Internal endpoints, metrics and API docs are not publicly reachable.
 
 Details: [docs/security.md](docs/security.md).
-
-## Testing
-
-| Check | Result |
-| --- | --- |
-| Backend `pytest` | 553 passed, 11 skipped (S3 tests need an S3 server) |
-| `ruff check`, `ruff format --check`, `mypy` | Clean (mypy: 171 source files) |
-| Frontend lint, typecheck, build | Pass |
-| Playwright on the production compose stack with the stub model | 22 of 22 passed (run at `ab6004d`; unchanged since) |
-
-Backend and frontend checks were rerun on 2026-10-21 at this commit's code. See
-[docs/testing.md](docs/testing.md).
 
 ## Limitations
 
