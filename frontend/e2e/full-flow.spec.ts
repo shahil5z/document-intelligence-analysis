@@ -61,7 +61,7 @@ test("public pages render", async ({ browser }) => {
   await page.goto("/");
   await expect(page).toHaveTitle("Document Intelligence & Analysis");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "Study with your own material. Get answers you can check.",
+    "Document Intelligence & Analysis",
   );
   await expect(page.getByRole("img", { name: "Document Intelligence & Analysis" }).first()).toBeVisible();
   await expect(page.getByRole("contentinfo")).toContainText(/© \d{4} Document Intelligence & Analysis/);

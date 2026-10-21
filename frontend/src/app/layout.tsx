@@ -4,7 +4,7 @@ import type { Metadata, Viewport } from "next";
 
 import { ToastProvider } from "@/components/Toast";
 import { THEME_INIT_SCRIPT } from "@/components/theme/theme-script";
-import { PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand";
+import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "@/lib/brand";
 
 import "./globals.css";
 
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   metadataBase: siteUrl(),
   applicationName: PRODUCT_NAME,
   title: { default: PRODUCT_NAME, template: `%s · ${PRODUCT_NAME}` },
-  description: PRODUCT_TAGLINE,
+  description: PRODUCT_DESCRIPTION,
   icons: {
     icon: [{ url: "/favicon.ico", sizes: "16x16 32x32 48x48" }],
     apple: [{ url: "/brand/apple-touch-icon.png", sizes: "180x180" }],
@@ -28,13 +28,13 @@ export const metadata: Metadata = {
     type: "website",
     siteName: PRODUCT_NAME,
     title: PRODUCT_NAME,
-    description: PRODUCT_TAGLINE,
+    description: PRODUCT_DESCRIPTION,
     images: [{ url: "/brand/og-image.png", width: 1200, height: 630, alt: PRODUCT_NAME }],
   },
   twitter: {
     card: "summary_large_image",
     title: PRODUCT_NAME,
-    description: PRODUCT_TAGLINE,
+    description: PRODUCT_DESCRIPTION,
     images: ["/brand/og-image.png"],
   },
   // The app has its own dark mode; ask the Dark Reader extension not to restyle it.

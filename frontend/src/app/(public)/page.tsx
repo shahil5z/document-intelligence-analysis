@@ -1,71 +1,131 @@
 import { DemoButton } from "@/components/demo/DemoButton";
-import { FullLogo } from "@/components/Logo";
 import { ButtonLink } from "@/components/ui";
+import { GITHUB_URL } from "@/lib/brand";
+
+const CAPABILITIES = [
+  {
+    title: "Document processing",
+    body: "PDF, DOCX and TXT files are extracted page by page, normalised and split into token-aware chunks that keep page numbers and character offsets.",
+  },
+  {
+    title: "Hybrid search",
+    body: "Each query runs a pgvector similarity search and a Postgres full-text search; the two ranked lists are merged with Reciprocal Rank Fusion.",
+  },
+  {
+    title: "Cited RAG answers",
+    body: "Retrieved passages are sent to the language model with numbered references. Citations that do not match a retrieved passage are removed.",
+  },
+  {
+    title: "Background processing",
+    body: "Uploads return immediately. A Celery worker extracts, chunks and embeds the document, and the interface tracks its status until it is ready or failed.",
+  },
+];
 
 const STEPS = [
-  { title: "Upload", body: "Add lecture notes, papers or assignment briefs (PDF, Word .docx or .txt, up to 10 MB)." },
-  { title: "Search", body: "Find a topic by meaning or by exact words, across all your files." },
-  { title: "Ask", body: "Get a short answer with numbered sources that show the exact page." },
+  { n: "01", title: "Upload", body: "Add a PDF, DOCX or TXT file (up to 10 MB with an account). Processing runs in the background." },
+  { n: "02", title: "Search", body: "Search across your documents by meaning, by exact terms, or both. Results show the passage and its page." },
+  { n: "03", title: "Ask", body: "Ask a question in plain language. The answer is generated only from passages retrieved from your documents." },
+  { n: "04", title: "Verify", body: "Each claim carries a numbered citation. Open it to read the exact passage, file and page it came from." },
 ];
 
-const FEATURES = [
+const PIPELINE: { label: string; detail: string }[] = [
+  { label: "Document", detail: "PDF · DOCX · TXT" },
+  { label: "Extraction & chunking", detail: "pypdf, python-docx, token-aware chunks" },
+  { label: "Embeddings", detail: "bge-small-en-v1.5 on ONNX Runtime, 384-d" },
+  { label: "Postgres + pgvector", detail: "HNSW vector index, GIN full-text index" },
+  { label: "Hybrid retrieval", detail: "vector + keyword, Reciprocal Rank Fusion" },
+  { label: "Passages", detail: "top passages with page and offsets" },
+  { label: "LLM", detail: "OpenAI gpt-4o-mini, structured output" },
+  { label: "Cited answer", detail: "citations checked against retrieved passages" },
+];
+
+const STACK: { group: string; items: string[] }[] = [
+  { group: "Backend", items: ["Python", "FastAPI", "SQLAlchemy 2", "Alembic", "Pydantic", "Gunicorn / Uvicorn", "Argon2 password hashing", "JWT"] },
+  { group: "Data / Retrieval", items: ["PostgreSQL 16", "pgvector (HNSW)", "Postgres full-text search (GIN)", "Reciprocal Rank Fusion", "Redis"] },
+  { group: "AI", items: ["ONNX Runtime", "BAAI bge-small-en-v1.5", "OpenAI gpt-4o-mini", "Retrieval-augmented generation"] },
+  { group: "Infrastructure", items: ["Celery (worker + beat)", "Docker Compose", "Caddy (HTTPS)", "Oracle Cloud VM", "Vercel"] },
+  { group: "Frontend", items: ["Next.js 16", "React 19", "TypeScript", "Tailwind CSS 4", "Playwright"] },
+];
+
+const DECISIONS = [
   {
-    title: "Answers you can check",
-    body: "Every answer links to the passage it came from. If your files don't cover a question, it says so.",
-    icon: "M8 10h8M8 14h5M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-6l-4 3v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z",
+    title: "Why hybrid retrieval",
+    body: "Dense embeddings find passages that use different words for the same idea; full-text search reliably finds exact names, codes and numbers. Fusing both by rank avoids having to calibrate two incompatible score scales.",
   },
   {
-    title: "Question ideas for each file",
-    body: "After upload you get a few suggested questions based on that file, so you know where to start.",
-    icon: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3Z",
+    title: "Why asynchronous processing",
+    body: "Extraction and embedding can take seconds to minutes. Running them in a Celery worker keeps the upload request fast, allows retries for transient failures, and gives each document an explicit status.",
   },
   {
-    title: "Your files stay yours",
-    body: "Only your account can see your files, searches and answers. You can delete a file at any time.",
-    icon: "M12 3 4.5 6v5.5c0 4.4 3.2 8.4 7.5 9.5 4.3-1.1 7.5-5.1 7.5-9.5V6L12 3Z",
+    title: "Why ONNX Runtime",
+    body: "The backend runs on a small 1 GB VM. Serving the embedding model with ONNX Runtime avoids a full deep-learning framework, and only the API process loads it; the worker sends chunks to an internal endpoint instead of holding a second copy.",
+  },
+  {
+    title: "Why citations",
+    body: "A generated answer is only useful if it can be checked. Every answer references numbered passages, references that do not match a retrieved passage are dropped, and an answer with no valid citation is withheld.",
   },
 ];
 
-function Icon({ d }: { d: string }) {
+const PRIVACY = [
+  "Documents and everything derived from them are scoped to your account; other accounts cannot access them.",
+  "You can delete a document at any time; this removes the file, its passages and its embeddings.",
+  "No analytics or tracking scripts. A single HttpOnly cookie keeps you signed in.",
+  "When you ask a question, the question and the retrieved passages are sent to OpenAI. After an upload, the beginning of the document text is sent once to suggest questions.",
+];
+
+function SectionHeading({ id, eyebrow, title, intro }: { id: string; eyebrow: string; title: string; intro?: string }) {
   return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-      <path d={d} strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className="max-w-2xl">
+      <p className="font-mono text-xs uppercase tracking-[0.14em] text-subtle">{eyebrow}</p>
+      <h2 id={id} className="mt-3 text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
+        {title}
+      </h2>
+      {intro ? <p className="mt-3 leading-relaxed text-muted">{intro}</p> : null}
+    </div>
   );
 }
 
-function Chip({ n }: { n: string }) {
+function Cite({ n }: { n: number }) {
   return (
-    <span className="mx-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-xs font-semibold text-brand-700 ring-1 ring-inset ring-brand-200">{n}</span>
+    <span className="mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-brand-50 px-1 align-text-top text-[11px] font-semibold text-brand-700 ring-1 ring-inset ring-brand-200">
+      {n}
+    </span>
   );
 }
 
-function AnswerPreview() {
+function ExampleAnswer() {
+  const sources = [
+    { n: 1, file: "annual-report-2025.pdf", page: "page 2", text: "The report finds that operating costs rose 8% year over year, driven mainly by energy and logistics…" },
+    { n: 2, file: "annual-report-2025.pdf", page: "pages 6-7", text: "We recommend consolidating regional warehouses and renegotiating long-term energy contracts…" },
+  ];
   return (
-    <figure className="relative rounded-2xl border border-border bg-surface p-5 shadow-pop sm:p-6" aria-label="Example of an answer with sources">
-      <div className="flex items-center gap-2 text-xs text-subtle">
-        <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
-        Example · biology-lecture-04.pdf
-      </div>
-      <p className="mt-4 text-sm font-medium text-fg">What is the difference between mitosis and meiosis?</p>
-      <div className="mt-3 rounded-xl bg-surface-2 p-4 text-sm leading-6 text-fg">
-        Mitosis makes <strong>two identical cells</strong> for growth and repair
-        <Chip n="1" />. Meiosis makes <strong>four cells with half the chromosomes</strong>, used for
-        reproduction
-        <Chip n="2" />.
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {[
-          ["1", "page 3", "…mitosis produces two genetically identical daughter cells…"],
-          ["2", "page 5", "…meiosis results in four haploid cells…"],
-        ].map(([n, page, text]) => (
-          <div key={n} className="rounded-lg border border-border p-3 text-xs">
-            <p className="font-semibold text-fg">
-              [{n}] biology-lecture-04.pdf <span className="font-normal text-subtle">· {page}</span>
-            </p>
-            <p className="mt-1 text-muted">{text}</p>
-          </div>
-        ))}
+    <figure className="rounded-xl border border-border bg-surface p-5 sm:p-6" aria-labelledby="example-caption">
+      <figcaption id="example-caption" className="flex items-center justify-between gap-3 text-xs text-subtle">
+        <span className="font-mono uppercase tracking-[0.14em]">Example answer</span>
+        <span>Illustrative content, not real output</span>
+      </figcaption>
+      <p className="mt-5 text-sm font-medium text-fg">What are the main findings of this document?</p>
+      <p className="mt-3 text-[15px] leading-7 text-fg">
+        The document reports that operating costs increased year over year, mainly because of
+        energy and logistics expenses <Cite n={1} />. It recommends consolidating regional
+        warehouses and renegotiating energy contracts to reduce them <Cite n={2} />.
+      </p>
+      <div className="mt-5 border-t border-border pt-4">
+        <p className="mb-2 text-sm font-semibold text-fg">Sources</p>
+        <ol className="space-y-2">
+          {sources.map((s) => (
+            <li key={s.n} className="rounded-lg border border-border bg-surface-2 p-3">
+              <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-fg">
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-primary px-1 text-[11px] font-semibold text-white">
+                  {s.n}
+                </span>
+                <span className="text-link">{s.file}</span>
+                <span className="font-normal text-subtle">{s.page}</span>
+              </p>
+              <p className="mt-1.5 text-sm text-muted">{s.text}</p>
+            </li>
+          ))}
+        </ol>
       </div>
     </figure>
   );
@@ -74,78 +134,189 @@ function AnswerPreview() {
 export default function LandingPage() {
   return (
     <>
-      <section className="relative overflow-hidden">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
-          <div className="absolute -left-40 -top-40 h-[480px] w-[480px] rounded-full bg-brand-600/15 blur-3xl" />
-          <div className="absolute -right-32 top-20 h-[420px] w-[420px] rounded-full bg-violet-600/15 blur-3xl" />
-        </div>
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-16 pt-12 sm:px-6 sm:pt-16 lg:grid-cols-[1.1fr_1fr] lg:pb-24">
-          <div>
-            <FullLogo width={220} className="mb-6" />
-            <h1 className="max-w-xl text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
-              Study with your own material. <span className="text-gradient">Get answers you can check.</span>
-            </h1>
-            <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted">
-              Upload your notes or papers, search them, and ask questions with answers that
-              point back to the exact page.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <DemoButton size="lg" variant="primary" />
-              <ButtonLink href="/register" size="lg" variant="secondary">
-                Create free account
-              </ButtonLink>
-            </div>
-            <p className="mt-4 text-xs text-subtle">
-              Demo: no sign-up, 1 PDF up to 5 MB, 3 questions, deleted after 24 hours.
-            </p>
-          </div>
-          <AnswerPreview />
+      {/* A. Hero */}
+      <section className="mx-auto max-w-6xl px-4 pb-16 pt-14 sm:px-6 sm:pt-20 lg:pb-24">
+        <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-fg sm:text-5xl lg:text-6xl">
+          Document Intelligence &amp; Analysis
+        </h1>
+        <p className="mt-6 max-w-2xl text-lg leading-relaxed text-fg sm:text-xl">
+          Search, understand, and ask questions about your documents with cited AI answers.
+        </p>
+        <p className="mt-4 max-w-2xl leading-relaxed text-muted">
+          Documents are extracted and chunked in a background worker, embedded with an ONNX model,
+          and indexed in Postgres with pgvector. Questions are answered with retrieval-augmented
+          generation over hybrid (vector + full-text) search, and every answer cites its sources.
+        </p>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <DemoButton size="lg" variant="primary" label="Try the Demo" />
+          <ButtonLink href={GITHUB_URL} size="lg" variant="secondary" rel="noopener noreferrer">
+            View on GitHub
+          </ButtonLink>
+          <ButtonLink href="/#how-it-works" size="lg" variant="ghost">
+            How it works
+          </ButtonLink>
         </div>
       </section>
 
-      <section id="how-it-works" aria-labelledby="how-heading" className="scroll-mt-20 border-y border-border bg-surface">
+      {/* B. Capabilities */}
+      <section aria-labelledby="capabilities-heading" className="border-t border-border">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-          <h2 id="how-heading" className="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
-            How it works
-          </h2>
-          <ol className="mt-8 grid gap-6 md:grid-cols-3">
-            {STEPS.map((step, index) => (
-              <li key={step.title} className="rounded-xl border border-border bg-background p-6">
-                <span className="bg-brand-gradient flex h-8 w-8 items-center justify-center rounded-lg text-sm font-semibold text-white" aria-hidden="true">
-                  {index + 1}
-                </span>
-                <h3 className="mt-4 font-semibold text-fg">{step.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-muted">{step.body}</p>
+          <SectionHeading id="capabilities-heading" eyebrow="Capabilities" title="What the system does" />
+          <dl className="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2">
+            {CAPABILITIES.map((c) => (
+              <div key={c.title} className="border-l-2 border-border pl-5">
+                <dt className="font-semibold text-fg">{c.title}</dt>
+                <dd className="mt-2 text-sm leading-relaxed text-muted">{c.body}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </section>
+
+      {/* C + D. Demo and example */}
+      <section aria-labelledby="demo-heading" className="border-t border-border">
+        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[1fr_1.2fr] lg:items-start">
+          <div>
+            <SectionHeading
+              id="demo-heading"
+              eyebrow="Live demo"
+              title="Try it without an account"
+              intro="The demo creates a temporary, isolated account. Limits are enforced by the backend."
+            />
+            <ul className="mt-6 divide-y divide-border rounded-xl border border-border text-sm">
+              <li className="flex justify-between gap-4 px-4 py-3"><span className="text-muted">Documents</span><span className="font-medium text-fg">1 PDF</span></li>
+              <li className="flex justify-between gap-4 px-4 py-3"><span className="text-muted">Maximum file size</span><span className="font-medium text-fg">5 MB</span></li>
+              <li className="flex justify-between gap-4 px-4 py-3"><span className="text-muted">AI questions</span><span className="font-medium text-fg">3</span></li>
+              <li className="flex justify-between gap-4 px-4 py-3"><span className="text-muted">Data retention</span><span className="font-medium text-fg">Deleted after 24 hours</span></li>
+            </ul>
+            <div className="mt-6">
+              <DemoButton size="lg" variant="primary" label="Try the Demo" />
+            </div>
+          </div>
+          <ExampleAnswer />
+        </div>
+      </section>
+
+      {/* E. How it works */}
+      <section id="how-it-works" aria-labelledby="how-heading" className="scroll-mt-20 border-t border-border bg-surface">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <SectionHeading id="how-heading" eyebrow="Workflow" title="How it works" />
+          <ol className="mt-10 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            {STEPS.map((s) => (
+              <li key={s.n}>
+                <span className="font-mono text-sm text-subtle" aria-hidden="true">{s.n}</span>
+                <h3 className="mt-2 font-semibold text-fg">{s.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted">{s.body}</p>
               </li>
             ))}
           </ol>
         </div>
       </section>
 
-      <section aria-label="Features" className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-        <div className="grid gap-4 md:grid-cols-3">
-          {FEATURES.map((feature) => (
-            <div key={feature.title} className="rounded-xl border border-border bg-surface p-6 shadow-card">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-200">
-                <Icon d={feature.icon} />
-              </div>
-              <h3 className="mt-4 font-semibold text-fg">{feature.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-muted">{feature.body}</p>
-            </div>
-          ))}
+      {/* F. Architecture */}
+      <section id="architecture" aria-labelledby="arch-heading" className="scroll-mt-20 border-t border-border">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <SectionHeading
+            id="arch-heading"
+            eyebrow="Architecture"
+            title="Built as an AI retrieval system"
+            intro="The path from an uploaded file to a cited answer, as implemented in the backend."
+          />
+          <ol className="mt-10 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+            {PIPELINE.map((step, i) => (
+              <li key={step.label} className="bg-background p-5">
+                <span className="font-mono text-xs text-subtle">{String(i + 1).padStart(2, "0")}</span>
+                <p className="mt-2 font-medium text-fg">{step.label}</p>
+                <p className="mt-1 text-sm text-muted">{step.detail}</p>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-6 max-w-3xl text-sm leading-relaxed text-muted">
+            <span className="font-medium text-fg">Asynchronous processing:</span> steps 02 to 04 run in a
+            Celery worker with Redis as the broker. The worker sends chunks to a private embedding
+            endpoint in the API, so the model is loaded once. A scheduled task removes expired demo
+            accounts and re-queues stalled jobs.
+          </p>
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
-        <div className="bg-brand-gradient relative overflow-hidden rounded-2xl px-6 py-12 text-center text-white sm:px-12">
-          <h2 className="text-2xl font-semibold sm:text-3xl">Try it with your own notes</h2>
-          <p className="mx-auto mt-3 max-w-xl text-sm text-white/90">
-            Start the demo, or create a free account to keep your files.
+      {/* G. Tech stack */}
+      <section aria-labelledby="stack-heading" className="border-t border-border bg-surface">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <SectionHeading id="stack-heading" eyebrow="Stack" title="Technologies used" />
+          <dl className="mt-10 grid gap-8 sm:grid-cols-2 lg:grid-cols-5">
+            {STACK.map((g) => (
+              <div key={g.group}>
+                <dt className="text-sm font-semibold text-fg">{g.group}</dt>
+                <dd className="mt-3">
+                  <ul className="space-y-1.5 text-sm text-muted">
+                    {g.items.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </section>
+
+      {/* H. Engineering decisions */}
+      <section aria-labelledby="decisions-heading" className="border-t border-border">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <SectionHeading id="decisions-heading" eyebrow="Design" title="Engineering decisions" />
+          <div className="mt-10 grid gap-4 md:grid-cols-2">
+            {DECISIONS.map((d) => (
+              <article key={d.title} className="rounded-xl border border-border p-6">
+                <h3 className="font-semibold text-fg">{d.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted">{d.body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* I + J. Privacy and limitations */}
+      <section aria-labelledby="privacy-heading" className="border-t border-border">
+        <div className="mx-auto grid max-w-6xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-2">
+          <div>
+            <SectionHeading id="privacy-heading" eyebrow="Privacy" title="How your data is handled" />
+            <ul className="mt-6 space-y-3 text-sm leading-relaxed text-muted">
+              {PRIVACY.map((p) => (
+                <li key={p} className="flex gap-3">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-subtle" aria-hidden="true" />
+                  <span>{p}</span>
+                </li>
+              ))}
+            </ul>
+            <a href="/privacy" className="mt-4 inline-block text-sm text-link hover:underline">Read the privacy policy</a>
+          </div>
+          <div>
+            <SectionHeading id="limits-heading" eyebrow="Limitations" title="What to keep in mind" />
+            <ul className="mt-6 space-y-3 text-sm leading-relaxed text-muted">
+              <li className="flex gap-3"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-subtle" aria-hidden="true" /><span>Answers are generated by a language model and can be wrong or incomplete. Check the cited passages.</span></li>
+              <li className="flex gap-3"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-subtle" aria-hidden="true" /><span>Extraction quality depends on the document. Scanned PDFs without a text layer are not supported (there is no OCR), and complex tables or multi-column layouts may be extracted imperfectly.</span></li>
+              <li className="flex gap-3"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-subtle" aria-hidden="true" /><span>The embedding model is English-focused, so semantic search works best on English text.</span></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* K. About */}
+      <section aria-labelledby="about-heading" className="border-t border-border bg-surface">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <SectionHeading id="about-heading" eyebrow="About" title="About the system" />
+          <p className="mt-6 max-w-3xl leading-relaxed text-muted">
+            Document Intelligence &amp; Analysis explores the engineering behind a retrieval-augmented
+            generation system end to end: reliable text extraction with page provenance, combining
+            dense and lexical retrieval, keeping generated answers grounded in verifiable citations,
+            and running asynchronous document processing with an embedding model on a single small
+            cloud VM. The backend exposes a REST API with per-account isolation, rate
+            limiting and an automated test suite; the frontend is a Next.js application that keeps
+            the session token server-side.
           </p>
-          <div className="mt-7 flex flex-wrap justify-center gap-3">
-            <DemoButton size="lg" variant="secondary" />
-            <ButtonLink href="/register" size="lg" variant="ghost" className="text-white ring-1 ring-inset ring-white/50 hover:bg-white/10 hover:text-white">
-              Create free account
+          <div className="mt-8 flex flex-wrap gap-3">
+            <DemoButton size="lg" variant="primary" label="Try the Demo" />
+            <ButtonLink href={GITHUB_URL} size="lg" variant="secondary" rel="noopener noreferrer">
+              View on GitHub
             </ButtonLink>
           </div>
         </div>
