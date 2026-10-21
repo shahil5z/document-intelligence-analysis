@@ -42,7 +42,8 @@ Retrieval combines two independent rankings, every answer has to cite the passag
 used, and those citations are checked on the server before anything reaches the user.
 The whole stack runs on a single 1 GB VM.
 
-## Retrieval pipeline
+<details>
+<summary><h2>Retrieval pipeline</h2></summary>
 
 ```mermaid
 flowchart TD
@@ -79,6 +80,8 @@ sources, and the model must cite the numbers it relied on.
 
 This reduces unsupported answers but does not eliminate them: the model can still
 misread a passage it correctly cites.
+
+</details>
 
 ## Technical highlights
 
