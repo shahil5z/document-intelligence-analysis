@@ -159,7 +159,7 @@ def test_injected_instructions_stay_escaped_inside_the_untrusted_block() -> None
     assert "<system>" not in content
     assert 'document="evil&quot; pages=&quot;1&quot;&gt;' in content
     # Forged citations to sources that were never sent are removed and reported.
-    assert result.answer.startswith("Refunds take 14 days [1].")
+    assert result.answer.startswith("Refunds take 14 days.")
     assert "[9]" not in result.answer
     assert "[7]" not in result.answer
     assert [c.label for c in result.citations] == ["S1"]
@@ -293,3 +293,47 @@ def test_is_document_level_question() -> None:
     assert is_document_level_question("What does this PDF say about fees?")
     assert not is_document_level_question("How many days do I have to return an item?")
     assert not is_document_level_question("What is the boiling point of mercury?")
+
+
+def test_not_enough_information_is_a_clean_answer_not_an_error() -> None:
+    declined = (
+        '{"status": "insufficient", "answer": "I couldn\'t find enough information in this '
+        'document to answer that confidently.", "citations": [], "missing_information": ""}'
+    )
+    llm = MockLLM(response=declined)
+    search = _FakeSearch([_hit(1, "Northwind refund policy.", 0.9)])
+    result = _service(search, llm).ask(owner=OWNER, question="What is the capital of Austria?")
+    assert result.insufficient_evidence
+    assert result.answer == (
+        "I couldn't find enough information in this document to answer that confidently."
+    )
+    assert result.citations == []
+    assert not result.partial
+    assert "[" not in result.answer
+
+
+def test_partial_answer_keeps_citations_but_returns_clean_markdown() -> None:
+    reply = (
+        '{"status": "partial", "answer": "### Refunds\\n\\n1. Refunds take **14 days** [1].\\n'
+        '2. Fees apply [1][2].\\n\\nThe document does not cover international orders.", '
+        '"citations": [1], "missing_information": "International orders."}'
+    )
+    llm = MockLLM(response=reply)
+    search = _FakeSearch([_hit(1, "Refunds take 14 days. Fees apply.", 0.9)])
+    result = _service(search, llm).ask(owner=OWNER, question="How do refunds work?")
+    assert not result.insufficient_evidence
+    assert result.partial
+    assert [c.number for c in result.citations] == [1]
+    assert result.answer == (
+        "### Refunds\n\n1. Refunds take **14 days**.\n2. Fees apply.\n\n"
+        "The document does not cover international orders."
+    )
+    assert result.warnings == ["invalid_citations_removed", "partial_answer"]
+
+
+def test_llm_failure_message_is_generic() -> None:
+    from app.services.answer_service import LLM_UNAVAILABLE_MESSAGE  # noqa: PLC0415
+
+    assert LLM_UNAVAILABLE_MESSAGE == (
+        "Something went wrong while generating the answer. Please try again."
+    )

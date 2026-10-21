@@ -55,7 +55,7 @@ def test_answer_has_citations_from_retrieved_chunks(
     )
     body = _ask(client, user_headers, "How many days do I have to request a refund?")
     assert body["insufficient_evidence"] is False
-    assert body["answer"] == "You can request a refund within 30 days of delivery [1]."
+    assert body["answer"] == "You can request a refund within 30 days of delivery."
     assert body["model"] == "mock-llm"
     assert body["warnings"] == []
     assert body["partial"] is False

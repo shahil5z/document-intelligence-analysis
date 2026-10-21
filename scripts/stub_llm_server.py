@@ -55,12 +55,12 @@ def build_reply(user: str, style: str, structured: bool) -> str:
             "missing_information": "The sources do not cover the question.",
         }
     else:
-        parts = [f"According to the document, {_first_sentence(sources[0][1])} [1]."]
+        parts = [f"### Summary\n\nThe document states: {_first_sentence(sources[0][1])} [1]."]
         cited = [1]
         if len(sources) > 1:
             parts.append(f"\n\n- It also states: {_first_sentence(sources[1][1])} [2].")
             cited.append(2)
-        parts.append(" This is consistent with the policy summary [99].")
+        parts.append("\n\nThis is consistent with the policy summary [99].")
         data = {
             "status": "answered",
             "answer": "".join(parts),

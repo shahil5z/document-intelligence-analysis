@@ -20,7 +20,7 @@ from importlib import resources
 from string import Template
 from typing import Any
 
-PROMPT_VERSION = "2026-10-18.2"
+PROMPT_VERSION = "2026-10-21.1"
 
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _FILES = frozenset(

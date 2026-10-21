@@ -20,6 +20,7 @@ from app.db.repositories.chunks import ChunkHit
 from app.domain.enums import SearchMode
 from app.processing.chunking import ApproximateTokenCounter
 from app.prompt import PROMPT_VERSION
+from app.services.answer_format import strip_citation_markers
 from app.services.answer_service import INSUFFICIENT_EVIDENCE_ANSWER, AnswerService
 from app.services.retrieval import RankedChunk
 from app.services.search_service import SearchResult
@@ -134,14 +135,13 @@ def test_replayed_reply(case: dict[str, Any]) -> None:
     if "missing" in expect:
         assert result.missing_information == expect["missing"]
     if "contains" in expect:
-        assert expect["contains"] in result.answer
+        assert strip_citation_markers(expect["contains"]) in result.answer
     for warning in expect.get("warnings", []):
         assert warning in result.warnings
-    # Markers in the returned text are normalised and refer only to returned citations.
+    # Grounding is checked on the markers; the returned text is clean Markdown without them.
     import re  # noqa: PLC0415
 
-    markers = {int(n) for n in re.findall(r"\[(\d+)\]", result.answer) if int(n) < 100}
-    assert markers == set(expect["citations"])
+    assert not [n for n in re.findall(r"\[(\d+)\]", result.answer) if int(n) <= 100]
     # The request: structured output schema, all three passages, ask_top_k default.
     body = sent[0]
     assert body["response_format"]["type"] == "json_schema"

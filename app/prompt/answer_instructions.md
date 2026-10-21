@@ -11,8 +11,8 @@
 Answer the question in <question> using only the $source_count sources above. Cite them by number, like [1] or [2][3].
 
 Reply with a JSON object only:
-{"status": "answered" | "partial" | "insufficient", "answer": "<markdown answer with [n] citations>", "citations": [<numbers of the sources you cited>], "missing_information": "<what the sources do not cover, or an empty string>"}
+{"status": "answered" | "partial" | "insufficient", "answer": "<presentation-ready markdown answer with [n] citations>", "citations": [<numbers of the sources you cited>], "missing_information": "<what the sources do not cover, or an empty string>"}
 
 - "answered": the sources fully answer the question.
-- "partial": you answered what the sources support; "missing_information" says what is missing.
-- "insufficient": none of the sources is relevant; "answer" is one sentence saying so and "citations" is empty.
+- "partial": you answered what the sources support, and the answer itself says what the document does not cover; "missing_information" repeats that in one sentence.
+- "insufficient": none of the sources is relevant; "answer" is "I couldn't find enough information in this document to answer that confidently." and "citations" is empty.

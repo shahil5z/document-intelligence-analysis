@@ -13,7 +13,8 @@ Outcome rules:
   ``is_document_level_question``);
 * answered / partial: the reply has at least one valid citation; invalid citations are
   dropped and reported in ``warnings``; ``partial`` keeps the supported answer and says
-  what is missing;
+  what is missing. The returned answer text has its ``[n]`` markers stripped
+  (``answer_format``); the validated citations are returned separately;
 * insufficient with a reason: ``model_declined`` (model said no source is relevant and
   cited nothing), ``parse_failed`` (empty/unusable reply) or ``no_valid_citations``
   (an answer that cites nothing that was sent - treated as ungrounded).
@@ -38,6 +39,7 @@ from app.db.models import User
 from app.domain.enums import SearchMode
 from app.processing.chunking import TokenCounter
 from app.prompt import PROMPT_VERSION, insufficient_evidence_answer, response_schema
+from app.services.answer_format import strip_citation_markers
 from app.services.answer_parsing import (
     MAX_SOURCE_NUMBER,
     markers_in,
@@ -49,7 +51,7 @@ from app.services.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 
-LLM_UNAVAILABLE_MESSAGE = "The answer service is temporarily unavailable; /search still works"
+LLM_UNAVAILABLE_MESSAGE = "Something went wrong while generating the answer. Please try again."
 LLM_NOT_CONFIGURED_MESSAGE = "Question answering is not configured; /search still works"
 
 InsufficientReason = Literal[
@@ -281,7 +283,9 @@ class AnswerService:
             },
         )
         return AnswerResult(
-            answer=answer,
+            # Grounding is checked on the marked-up text above; users get clean Markdown
+            # and the validated citations as structured data.
+            answer=strip_citation_markers(answer),
             insufficient_evidence=False,
             citations=[
                 CitedSource(label=by_number[n].label, number=n, source=by_number[n])
