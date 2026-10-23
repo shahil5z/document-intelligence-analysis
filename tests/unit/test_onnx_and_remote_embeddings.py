@@ -220,6 +220,28 @@ def test_remote_provider_retries_then_reports_unavailable(
     assert _remote(retries=1).embed(["a"]) == [vector]
 
 
+@pytest.mark.parametrize(
+    "timeout_error",
+    [TimeoutError("timed out"), urllib.error.URLError(TimeoutError("timed out"))],
+)
+def test_remote_provider_does_not_resend_a_timed_out_batch(
+    monkeypatch: pytest.MonkeyPatch, timeout_error: Exception
+) -> None:
+    # The API keeps computing a batch after the client gives up; resending it would
+    # stack a second copy on the same CPU, so a timeout fails the call straight away.
+    requests = _install_urlopen(monkeypatch, [timeout_error, {"vectors": [[1.0, 0, 0, 0]]}])
+    with pytest.raises(EmbeddingServiceUnavailableError):
+        _remote(retries=2).embed(["a"])
+    assert len(requests) == 1
+
+
+def test_remote_provider_defaults_to_small_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    vector = [1.0, 0.0, 0.0, 0.0]
+    requests = _install_urlopen(monkeypatch, [{"vectors": [vector] * 8}, {"vectors": [vector] * 2}])
+    assert _remote().embed([str(i) for i in range(10)]) == [vector] * 10
+    assert [len(json.loads(r.data)["texts"]) for r in requests] == [8, 2]
+
+
 def test_remote_provider_client_errors_and_bad_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     forbidden = urllib.error.HTTPError("u", 403, "no", {}, None)  # type: ignore[arg-type]
     _install_urlopen(monkeypatch, [forbidden])
@@ -242,11 +264,16 @@ def test_factory_builds_remote_provider_and_token_counter() -> None:
         embedding_remote_url="http://api:8000/internal/embed",
         internal_embed_secret=SECRET,
         embedding_batch_size=200,
+        embedding_remote_batch_size=100,
         internal_embed_max_batch=64,
     )
     provider = create_embedding_provider(settings)
     assert isinstance(provider, RemoteEmbeddingProvider)
     assert provider._batch_size == 64  # noqa: SLF001
+    default = create_embedding_provider(
+        settings.model_copy(update={"embedding_remote_batch_size": 8})
+    )
+    assert default._batch_size == 8  # noqa: SLF001
     counter = create_token_counter(settings)
     assert counter is create_token_counter(settings)
     assert isinstance(counter, TokenizerCounter)

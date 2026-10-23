@@ -106,7 +106,11 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             settings.internal_embed_secret.get_secret_value(),
             model_name=settings.embedding_model,
             expected_dimension=settings.embedding_dimension,
-            batch_size=min(settings.embedding_batch_size, settings.internal_embed_max_batch),
+            batch_size=min(
+                settings.embedding_batch_size,
+                settings.embedding_remote_batch_size,
+                settings.internal_embed_max_batch,
+            ),
             timeout_seconds=settings.embedding_remote_timeout_seconds,
         )
     if settings.embedding_provider == "sentence-transformers":

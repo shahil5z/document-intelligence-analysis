@@ -320,6 +320,9 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # Caddy runs as PID 1 and does not reap children, so healthcheck processes that
+    # time out were left as zombies (over 1000 on the 1 GB VM). tini reaps them.
+    init: true
     cap_drop:
       - ALL
     cap_add:

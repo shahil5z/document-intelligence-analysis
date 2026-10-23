@@ -133,7 +133,12 @@ class Settings(BaseSettings):
     embedding_onnx_file: str = "onnx/model.onnx"
     # EMBEDDING_PROVIDER=remote: the API's internal endpoint, e.g. http://api:8000/internal/embed
     embedding_remote_url: str | None = None
-    embedding_remote_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    # Keep below GUNICORN_TIMEOUT (120). A timed-out batch is not resent: the API would
+    # still be computing the abandoned copy.
+    embedding_remote_timeout_seconds: float = Field(default=110.0, gt=0, le=600)
+    # Texts per /internal/embed request. Small batches keep each request well inside the
+    # timeout on a shared 1-2 vCPU host (ONNX cost grows with batch x padded length).
+    embedding_remote_batch_size: int = Field(default=8, ge=1, le=512)
     # Shared secret for POST /internal/embed (X-Internal-Secret header). Unset = the
     # endpoint answers 404. Required whenever EMBEDDING_PROVIDER=remote.
     internal_embed_secret: SecretStr | None = None

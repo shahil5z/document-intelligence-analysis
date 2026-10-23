@@ -25,8 +25,8 @@ class RemoteEmbeddingProvider:
         *,
         model_name: str,
         expected_dimension: int,
-        batch_size: int = 32,
-        timeout_seconds: float = 60.0,
+        batch_size: int = 8,
+        timeout_seconds: float = 110.0,
         retries: int = 2,
     ) -> None:
         self._url = url
@@ -54,12 +54,14 @@ class RemoteEmbeddingProvider:
             headers={"Content-Type": "application/json", SECRET_HEADER: self._secret},
         )
         last: Exception | None = None
+        payload: Any = None
         for attempt in range(self._retries + 1):
             if attempt:
                 time.sleep(min(2.0 * attempt, 5.0))
             try:
                 with urllib.request.urlopen(request, timeout=self._timeout) as response:  # noqa: S310
-                    payload: Any = json.loads(response.read())
+                    payload = json.loads(response.read())
+                last = None
                 break
             except urllib.error.HTTPError as exc:
                 if exc.code < 500:
@@ -67,9 +69,18 @@ class RemoteEmbeddingProvider:
                         f"embedding service rejected the request ({exc.code})"
                     ) from exc
                 last = exc
-            except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            except TimeoutError as exc:
+                # The API is still busy with this batch; sending it again only queues a
+                # second copy behind the first on a CPU-bound process. Fail fast and let
+                # the job-level retry try later.
                 last = exc
-        else:
+                break
+            except (urllib.error.URLError, ConnectionError) as exc:
+                if isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, TimeoutError):
+                    last = exc
+                    break
+                last = exc
+        if last is not None:
             raise EmbeddingServiceUnavailableError(
                 f"embedding service unavailable ({type(last).__name__})"
             ) from last

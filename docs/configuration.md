@@ -37,7 +37,8 @@ a message that names the variable, never the value.
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` | `*` rejected |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` / `EMBEDDING_BATCH_SIZE` | `onnx` / `BAAI/bge-small-en-v1.5` / `384` / `32` | `onnx` = ONNX Runtime, the model's fp32 ONNX export, CLS pooling + L2 norm (no PyTorch); `remote` = delegate to the API's `POST /internal/embed` (worker on small machines: one model copy, in the API); `sentence-transformers` = PyTorch, needs `uv sync --extra torch`. Dimension must match the `vector(384)` column |
 | `EMBEDDING_ONNX_FILE` | `onnx/model.onnx` | ONNX file inside the model repository |
-| `EMBEDDING_REMOTE_URL` / `EMBEDDING_REMOTE_TIMEOUT_SECONDS` | unset / `60` | `remote` only, e.g. `http://api:8000/internal/embed`; connection failures are transient (job retried, search 503) |
+| `EMBEDDING_REMOTE_URL` / `EMBEDDING_REMOTE_TIMEOUT_SECONDS` | unset / `110` | `remote` only, e.g. `http://api:8000/internal/embed`; connection failures are transient (job retried, search 503); a timed-out batch is not resent |
+| `EMBEDDING_REMOTE_BATCH_SIZE` | `8` | `remote` only: texts per `/internal/embed` request (also capped by `EMBEDDING_BATCH_SIZE` and `INTERNAL_EMBED_MAX_BATCH`) |
 | `INTERNAL_EMBED_SECRET` | unset | >= 32 chars; enables `POST /internal/embed` (404 when unset), sent by the worker as `X-Internal-Secret`, compared in constant time; required with `EMBEDDING_PROVIDER=remote`. Not in the OpenAPI docs; Caddy answers 404 for `/internal/*` |
 | `INTERNAL_EMBED_MAX_BATCH` / `INTERNAL_EMBED_MAX_TEXT_CHARS` | `64` / `8000` | per-request caps (the body is also capped by `MAX_REQUEST_BODY_BYTES`) |
 | `TORCH_NUM_THREADS` | `2` | inference threads per process (ONNX Runtime intra-op or PyTorch); `0` = one per core (much slower when processes share the CPU, see [docs/performance.md](performance.md)) |
